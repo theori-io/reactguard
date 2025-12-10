@@ -27,7 +27,6 @@ from ..http import (
     HttpRequest,
     create_default_http_client,
     send_with_retries,
-    set_shared_http_client,
 )
 from ..http.client import HttpClient
 from ..models import FrameworkDetectionResult, ScanRequest
@@ -44,7 +43,6 @@ class FrameworkDetectionEngine:
 
     def __init__(self, http_client: Optional[HttpClient] = None):
         self.http_client = http_client or create_default_http_client()
-        set_shared_http_client(self.http_client)
 
     def detect(self, request: ScanRequest) -> FrameworkDetectionResult:
         response = request.response or self._fetch(request)

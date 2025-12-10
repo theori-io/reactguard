@@ -55,6 +55,8 @@ class HttpSettings:
     max_retries: int = _int_env("REACTGUARD_HTTP_RETRIES", 2)
     backoff_factor: float = _float_env("REACTGUARD_HTTP_BACKOFF", 2.0)
     initial_delay: float = _float_env("REACTGUARD_HTTP_INITIAL_DELAY", 1.0)
+    retry_budget_multiplier: float = _float_env("REACTGUARD_HTTP_RETRY_BUDGET_MULTIPLIER", 10.0)
+    retry_budget_cap: float = _float_env("REACTGUARD_HTTP_RETRY_BUDGET_CAP", 200.0)
     user_agent: str = os.getenv("REACTGUARD_USER_AGENT", DEFAULT_USER_AGENT)
     allow_redirects: bool = os.getenv("REACTGUARD_HTTP_REDIRECTS", "true").lower() == "true"
     verify_ssl: bool = _bool_env("REACTGUARD_HTTP_VERIFY_SSL", True)

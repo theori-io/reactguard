@@ -25,7 +25,7 @@ from typing import Any, Dict, Optional
 
 from .framework_detection.engine import FrameworkDetectionEngine
 from .http.client import HttpClient, create_default_http_client
-from .models import FrameworkDetectionResult, ScanRequest
+from .models import FrameworkDetectionResult, ScanReport, ScanRequest, VulnerabilityReport
 from .scan.runner import ScanRunner
 from .vulnerability_detection.runner import VulnerabilityDetectionRunner
 
@@ -69,13 +69,16 @@ class ReactGuard:
         proxy_profile: Optional[str] = None,
         correlation_id: Optional[str] = None,
         detection_result: Optional[FrameworkDetectionResult] = None,
-    ) -> Dict[str, Any]:
-        return self.vulnerability_runner.run(
+    ) -> VulnerabilityReport:
+        result = self.vulnerability_runner.run(
             url,
             proxy_profile=proxy_profile,
             correlation_id=correlation_id,
             detection_result=detection_result,
         )
+        if isinstance(result, VulnerabilityReport):
+            return result
+        return VulnerabilityReport.from_mapping(result)
 
     def scan(
         self,
@@ -83,7 +86,7 @@ class ReactGuard:
         *,
         proxy_profile: Optional[str] = None,
         correlation_id: Optional[str] = None,
-    ) -> Dict[str, Any]:
+    ) -> ScanReport:
         request = ScanRequest(url=url, proxy_profile=proxy_profile, correlation_id=correlation_id)
         return self.scan_runner.run(request)
 

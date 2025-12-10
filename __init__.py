@@ -37,6 +37,7 @@ from .http import (
     create_default_http_client,
 )
 from .log import setup_logging
+from .models import ScanReport, VulnerabilityReport
 from .models.poc import PocStatus
 from .runtime import ReactGuard
 from .scan.runner import ScanRunner
@@ -59,8 +60,10 @@ __all__ = [
     "HttpxClient",
     "PocPlugin",
     "PocStatus",
+    "ScanReport",
     "ScanRunner",
     "VulnerabilityDetectionRunner",
+    "VulnerabilityReport",
     "RetryConfig",
     "ReactGuard",
     "get_applicable_pocs",

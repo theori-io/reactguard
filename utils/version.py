@@ -23,6 +23,13 @@ import re
 from dataclasses import dataclass
 from typing import Any, Dict, Optional, Tuple
 
+from .version_thresholds import (
+    NEXT_CANARY_SAFE_BUILD,
+    NEXT_PATCHED_PATCH_BY_MINOR,
+    REACT_FIXED_VERSIONS,
+    REACT_VULNERABLE_VERSIONS,
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -259,26 +266,84 @@ def extract_versions(headers: Dict[str, str], body: str) -> Dict[str, Any]:
     return versions
 
 
-REACT_PATCHED_VERSION = ParsedVersion(19, 2, 1)
-NEXT_PATCHED_VERSION = ParsedVersion(16, 0, 7)
-
-
 def is_react_version_vulnerable(version: Optional[str]) -> Optional[bool]:
     parsed = parse_semver(version)
     if not parsed:
         return None
     if parsed.major != 19:
         return False
-    return parsed < REACT_PATCHED_VERSION
+
+    version_key = (parsed.major, parsed.minor, parsed.patch)
+    if version_key in REACT_VULNERABLE_VERSIONS:
+        return True
+    if version_key in REACT_FIXED_VERSIONS:
+        return False
+
+    # Default for React 19.x not explicitly listed: assume fixed when patch >= latest known fix.
+    if parsed.minor == 0:
+        return parsed.patch == 0
+    if parsed.minor == 1:
+        return parsed.patch <= 1
+    if parsed.minor == 2:
+        return parsed.patch == 0
+    return False
 
 
 def is_next_version_vulnerable(version: Optional[str]) -> Optional[bool]:
     parsed = parse_semver(version)
     if not parsed:
         return None
-    if parsed.major < 15:
+    if parsed.major < 14:
         return False
-    return parsed < NEXT_PATCHED_VERSION
+
+    suffix = parsed.suffix or ""
+    is_canary = "canary" in suffix
+
+    def _canary_build(suf: str) -> Optional[int]:
+        match = re.search(r"canary\.?(\d+)", suf)
+        return int(match.group(1)) if match else None
+
+    if parsed.major == 14:
+        if not is_canary:
+            return False
+        build = _canary_build(suffix)
+        if parsed.minor > 3:
+            return True
+        if build is None:
+            return True
+        return build >= 77
+
+    if parsed.major == 15:
+        build = _canary_build(suffix) if is_canary else None
+        if is_canary:
+            if parsed.minor == 6 and build is not None:
+                safe_build = NEXT_CANARY_SAFE_BUILD.get((15, 6))
+                if safe_build is None:
+                    return True
+                return build < safe_build
+            return True
+
+        threshold = NEXT_PATCHED_PATCH_BY_MINOR.get(15, {}).get(parsed.minor)
+        if threshold is None:
+            return True
+        return parsed.patch < threshold
+
+    if parsed.major == 16:
+        build = _canary_build(suffix) if is_canary else None
+        if is_canary:
+            if parsed.minor == 1 and build is not None:
+                safe_build = NEXT_CANARY_SAFE_BUILD.get((16, 1))
+                if safe_build is None:
+                    return True
+                return build < safe_build
+            return True
+        if parsed.minor == 0:
+            return parsed.patch < NEXT_PATCHED_PATCH_BY_MINOR.get(16, {}).get(0, 0)
+        # Future 16.x minors default to vulnerable unless explicitly patched
+        return True
+
+    # Unknown future major: treat as not vulnerable by default.
+    return False
 
 
 def waku_version_implies_react_major(waku_version: Optional[str]) -> Optional[int]:

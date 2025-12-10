@@ -19,6 +19,7 @@
 """Waku framework detector."""
 
 from typing import Any, Dict
+from urllib.parse import urljoin
 
 from ...utils import TagSet
 from ..base import DetectionContext, FrameworkDetector
@@ -52,6 +53,7 @@ class WakuDetector(FrameworkDetector):
     ) -> None:
         is_waku = False
         has_rsc_surface = False
+        endpoints_list: list[str] = []
 
         if WAKU_META_GENERATOR_PATTERN.search(body):
             is_waku = True
@@ -90,6 +92,7 @@ class WakuDetector(FrameworkDetector):
             context.url,
             proxy_profile=context.proxy_profile,
             correlation_id=context.correlation_id,
+            http_client=context.http_client,
         ):
             is_waku = True
             signals["waku_minimal_html"] = True
@@ -100,6 +103,7 @@ class WakuDetector(FrameworkDetector):
                 context.url,
                 proxy_profile=context.proxy_profile,
                 correlation_id=context.correlation_id,
+                http_client=context.http_client,
             ):
                 is_waku = True
                 signals["waku_rsc_surface"] = True
@@ -110,10 +114,16 @@ class WakuDetector(FrameworkDetector):
                 context.url,
                 proxy_profile=context.proxy_profile,
                 correlation_id=context.correlation_id,
+                http_client=context.http_client,
             )
             if isinstance(action_probe, tuple):
                 has_actions = bool(action_probe[0])
                 action_count = action_probe[1] if len(action_probe) > 1 else 0
+                if len(action_probe) >= 3 and isinstance(action_probe[2], list):
+                    endpoints_list = [
+                        urljoin(context.url, ep[0]) if context.url else ep[0]
+                        for ep in action_probe[2]
+                    ]
             else:
                 has_actions = bool(action_probe)
                 action_count = 0
@@ -122,6 +132,8 @@ class WakuDetector(FrameworkDetector):
                 signals["server_actions_enabled"] = True
                 signals["waku_action_endpoints"] = action_count
                 has_rsc_surface = True
+                if endpoints_list:
+                    signals["server_action_endpoints"] = endpoints_list
 
         if is_waku:
             tags.add("waku")

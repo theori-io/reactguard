@@ -49,15 +49,21 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _print_json(data: Dict[str, Any]) -> None:
-    json.dump(data, sys.stdout, indent=2, sort_keys=True)
+def _print_json(data: Dict[str, Any] | Any) -> None:
+    payload = data.to_dict() if hasattr(data, "to_dict") else data
+    json.dump(payload, sys.stdout, indent=2, sort_keys=True)
     sys.stdout.write("\n")
 
 
-def _pretty_print(report: Dict[str, Any]) -> None:
-    status = report.get("status") or report.get("vulnerability_detection", {}).get("status")
-    detection = report.get("framework_detection", {}) or {}
-    vuln = report.get("vulnerability_detection", {}) or {}
+def _pretty_print(report: Dict[str, Any] | Any) -> None:
+    payload = report.to_dict() if hasattr(report, "to_dict") else report
+    if not isinstance(payload, dict):
+        print(payload)
+        return
+    report_dict: Dict[str, Any] = payload
+    status = report_dict.get("status") or report_dict.get("vulnerability_detection", {}).get("status")
+    detection = report_dict.get("framework_detection", {}) or {}
+    vuln = report_dict.get("vulnerability_detection", {}) or {}
     details = vuln.get("details", {}) or {}
 
     tags = detection.get("tags") or []
