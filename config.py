@@ -21,7 +21,7 @@
 import os
 from dataclasses import dataclass
 
-DEFAULT_USER_AGENT = "ReactGuard/0.5.0 (+https://reactguard.io) React2Shell scanner powered by Xint"
+DEFAULT_USER_AGENT = "ReactGuard/0.5.1 (+https://reactguard.io) React2Shell scanner powered by Xint"
 
 
 def _float_env(name: str, default: float) -> float:
