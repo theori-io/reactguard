@@ -24,6 +24,7 @@ from urllib.parse import urljoin
 
 from ...config import load_http_settings
 from ...http import scan_with_retry
+from ...http.client import HttpClient
 from ..constants import (
     SERVER_ACTIONS_FLIGHT_PATTERN,
     WAKU_ACTION_ID_PATTERN_V021,
@@ -43,6 +44,7 @@ def probe_waku_rsc_surface(
     *,
     proxy_profile: Optional[str] = None,
     correlation_id: Optional[str] = None,
+    http_client: Optional[HttpClient] = None,
 ) -> bool:
     if not base_url:
         return False
@@ -55,6 +57,7 @@ def probe_waku_rsc_surface(
             proxy_profile=proxy_profile,
             correlation_id=correlation_id,
             timeout=timeout,
+            http_client=http_client,
         )
         if not resp.get("ok"):
             return False
@@ -77,6 +80,7 @@ def probe_waku_minimal_html(
     *,
     proxy_profile: Optional[str] = None,
     correlation_id: Optional[str] = None,
+    http_client: Optional[HttpClient] = None,
 ) -> bool:
     minimal_pattern = WAKU_MINIMAL_HTML_PATTERN.search(body.strip())
     if not minimal_pattern:
@@ -93,6 +97,7 @@ def probe_waku_minimal_html(
             proxy_profile=proxy_profile,
             correlation_id=correlation_id,
             timeout=timeout,
+            http_client=http_client,
         )
         status = resp.get("status_code", 0)
         content_type = (resp.get("headers") or {}).get("content-type", "")
@@ -109,6 +114,7 @@ def probe_waku_server_actions(
     *,
     proxy_profile: Optional[str] = None,
     correlation_id: Optional[str] = None,
+    http_client: Optional[HttpClient] = None,
 ) -> Tuple[bool, int] | Tuple[bool, int, list[tuple[str, str]]]:
     if not base_url:
         return False, 0
@@ -122,6 +128,7 @@ def probe_waku_server_actions(
             proxy_profile=proxy_profile,
             correlation_id=correlation_id,
             timeout=timeout,
+            http_client=http_client,
         )
         if not scan.get("ok"):
             return False, 0
@@ -186,6 +193,7 @@ def probe_waku_server_actions(
                     proxy_profile=proxy_profile,
                     correlation_id=correlation_id,
                     timeout=timeout,
+                    http_client=http_client,
                 )
                 if not js_scan.get("ok"):
                     continue

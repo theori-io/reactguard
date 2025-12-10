@@ -51,14 +51,17 @@ def send_with_retries(
 ) -> HttpResponse:
     """Execute a request with basic retry/backoff semantics."""
     cfg = retry_config or build_default_retry_config()
+    settings = load_http_settings()
 
     attempt = 0
     delay = cfg.initial_delay
     last_response: Optional[HttpResponse] = None
-    base_timeout = request.timeout if request.timeout is not None else load_http_settings().timeout
+    base_timeout = request.timeout if request.timeout is not None else settings.timeout
     budget = 0.0
     if base_timeout and base_timeout > 0:
-        budget = 10 * cfg.max_attempts * base_timeout
+        budget = settings.retry_budget_multiplier * cfg.max_attempts * base_timeout
+        if settings.retry_budget_cap and settings.retry_budget_cap > 0:
+            budget = min(budget, settings.retry_budget_cap)
     deadline = time.monotonic() + budget if budget > 0 else None
 
     while attempt < cfg.max_attempts:

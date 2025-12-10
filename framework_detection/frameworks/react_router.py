@@ -94,6 +94,7 @@ class ReactRouterDetector(FrameworkDetector):
                 body,
                 proxy_profile=context.proxy_profile,
                 correlation_id=context.correlation_id,
+                http_client=context.http_client,
             )
             signals.update(bundle_signals)
 
@@ -129,4 +130,5 @@ class ReactRouterDetector(FrameworkDetector):
                 correlation_id=context.correlation_id,
                 rsc_tag="react-router-v7-rsc",
                 server_actions_tag="react-router-v7-server-actions",
+                http_client=context.http_client,
             )

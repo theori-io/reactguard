@@ -21,7 +21,7 @@
 from typing import Any, Dict, Optional
 
 from ..framework_detection.engine import FrameworkDetectionEngine
-from ..models import FrameworkDetectionResult, ScanRequest
+from ..models import FrameworkDetectionResult, ScanReport, ScanRequest
 from ..vulnerability_detection.runner import VulnerabilityDetectionRunner
 from .report import build_scan_report
 
@@ -39,7 +39,7 @@ class ScanRunner:
             self.detection_engine
         )
 
-    def run(self, request: ScanRequest) -> Dict[str, Any]:
+    def run(self, request: ScanRequest) -> ScanReport:
         detection_result: FrameworkDetectionResult = self.detection_engine.detect(request)
         target_url = detection_result.signals.get("final_url") or request.url
 

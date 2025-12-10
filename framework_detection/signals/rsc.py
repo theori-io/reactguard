@@ -23,6 +23,7 @@ from urllib.parse import urljoin
 
 from ...config import load_http_settings
 from ...http import scan_with_retry
+from ...http.client import HttpClient
 from ...utils import TagSet
 from ..constants import RSC_PROBE_FLIGHT_BODY_PATTERN
 from .server_actions import probe_server_actions_support
@@ -33,6 +34,7 @@ def probe_rsc_endpoint(
     *,
     proxy_profile: Optional[str] = None,
     correlation_id: Optional[str] = None,
+    http_client: Optional[HttpClient] = None,
 ) -> bool:
     if not base_url:
         return False
@@ -44,6 +46,7 @@ def probe_rsc_endpoint(
         timeout=timeout,
         proxy_profile=proxy_profile,
         correlation_id=correlation_id,
+        http_client=http_client,
     )
     if not resp.get("ok") or resp.get("status_code") != 200:
         return False
@@ -65,6 +68,7 @@ def probe_server_actions(
     *,
     proxy_profile: Optional[str] = None,
     correlation_id: Optional[str] = None,
+    http_client: Optional[HttpClient] = None,
 ) -> bool:
     if not base_url:
         return False
@@ -76,6 +80,7 @@ def probe_server_actions(
             payload_style="plain",
             proxy_profile=proxy_profile,
             correlation_id=correlation_id,
+            http_client=http_client,
         )
         if result_plain.get("supported"):
             return True
@@ -86,6 +91,7 @@ def probe_server_actions(
             payload_style="multipart",
             proxy_profile=proxy_profile,
             correlation_id=correlation_id,
+            http_client=http_client,
         )
         return bool(result_multipart.get("supported"))
     except Exception:
@@ -97,17 +103,20 @@ def probe_rsc_and_actions(
     *,
     proxy_profile: Optional[str] = None,
     correlation_id: Optional[str] = None,
+    http_client: Optional[HttpClient] = None,
 ) -> Dict[str, bool]:
     return {
         "rsc_endpoint_found": probe_rsc_endpoint(
             base_url,
             proxy_profile=proxy_profile,
             correlation_id=correlation_id,
+            http_client=http_client,
         ),
         "server_actions_enabled": probe_server_actions(
             base_url,
             proxy_profile=proxy_profile,
             correlation_id=correlation_id,
+            http_client=http_client,
         ),
     }
 
@@ -123,6 +132,7 @@ def apply_rsc_probe_results(
     server_actions_tag: Optional[str] = None,
     server_actions_imply_rsc: bool = False,
     set_defaults: bool = False,
+    http_client: Optional[HttpClient] = None,
 ) -> Dict[str, bool]:
     """
     Run the generic RSC + server action probes and fold the results into tags/signals.
@@ -137,6 +147,7 @@ def apply_rsc_probe_results(
             base_url,
             proxy_profile=proxy_profile,
             correlation_id=correlation_id,
+            http_client=http_client,
         )
 
     rsc_found = bool(probe_result.get("rsc_endpoint_found"))

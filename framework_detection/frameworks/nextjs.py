@@ -124,6 +124,7 @@ class NextJSDetector(FrameworkDetector):
                 payload_style="multipart",
                 proxy_profile=context.proxy_profile,
                 correlation_id=context.correlation_id,
+                http_client=context.http_client,
             )
             probe_body = (sa_result.get("body") or sa_result.get("body_snippet") or "").lower()
             has_next_marker = (

@@ -70,6 +70,7 @@ class ExpoDetector(FrameworkDetector):
                 body,
                 proxy_profile=context.proxy_profile,
                 correlation_id=context.correlation_id,
+                http_client=context.http_client,
             )
             if bundle_signals.get("expo_router"):
                 signals["expo_router"] = True
@@ -100,6 +101,7 @@ class ExpoDetector(FrameworkDetector):
                 server_actions_tag="expo-server-actions",
                 server_actions_imply_rsc=True,
                 set_defaults=True,
+                http_client=context.http_client,
             )
 
             if rsc_result["rsc_endpoint_found"] or rsc_result["server_actions_enabled"]:

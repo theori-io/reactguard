@@ -23,6 +23,7 @@ from typing import Dict, List, Optional
 from urllib.parse import urljoin, urlparse
 
 from ...http import scan_with_retry
+from ...http.client import HttpClient
 
 
 def extract_js_urls(body: str, base_url: str) -> List[str]:
@@ -91,6 +92,7 @@ def probe_js_bundles(
     timeout: Optional[float] = None,
     proxy_profile: Optional[str] = None,
     correlation_id: Optional[str] = None,
+    http_client: Optional[HttpClient] = None,
 ) -> Dict[str, bool]:
     signals: Dict[str, bool] = {}
 
@@ -103,6 +105,7 @@ def probe_js_bundles(
             allow_redirects=True,
             proxy_profile=proxy_profile,
             correlation_id=correlation_id,
+            http_client=http_client,
         )
         if not scan.get("ok") or scan.get("status_code") != 200:
             continue

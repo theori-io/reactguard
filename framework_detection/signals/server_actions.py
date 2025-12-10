@@ -22,10 +22,12 @@ from __future__ import annotations
 
 import secrets
 from typing import Any, Dict, Optional
+from urllib.parse import urljoin
 
 from ...config import load_http_settings
 from ...errors import ErrorCategory
 from ...http import scan_with_retry
+from ...http.client import HttpClient
 from ...utils import TagSet
 from ...utils.actions import generate_action_id
 from ..constants import (
@@ -54,6 +56,8 @@ def probe_server_actions_support(
     proxy_profile: Optional[str] = None,
     correlation_id: Optional[str] = None,
     timeout: Optional[float] = None,
+    http_client: Optional[HttpClient] = None,
+    action_endpoints: Optional[list[str]] = None,
 ) -> Dict[str, Any]:
     if not base_url:
         return {
@@ -83,14 +87,20 @@ def probe_server_actions_support(
         headers["Content-Type"] = "text/plain;charset=UTF-8"
         body = ""
 
+    target_url = base_url
+    if action_endpoints:
+        preferred = action_endpoints[0]
+        target_url = preferred if preferred.startswith("http") else urljoin(base_url, preferred)
+
     resp = scan_with_retry(
-        base_url,
+        target_url,
         method="POST",
         headers=headers,
         body=body,
         proxy_profile=proxy_profile,
         correlation_id=correlation_id,
         timeout=timeout,
+        http_client=http_client,
     )
 
     headers_lower = {k.lower(): v for k, v in (resp.get("headers") or {}).items()}
@@ -200,6 +210,7 @@ def probe_server_actions_support(
         "error_message": resp.get("error_message"),
         "payload_style": payload_style,
         "ok": resp.get("ok", False),
+        "probe_url": target_url,
     }
 
 
@@ -208,6 +219,7 @@ def detect_server_actions(
     proxy_profile: Optional[str] = None,
     correlation_id: Optional[str] = None,
     action_header: str = SERVER_ACTIONS_DEFAULT_ACTION_HEADER,
+    http_client: Optional[HttpClient] = None,
 ) -> Dict[str, Any]:
     action_id = generate_action_id()
     boundary = f"----FormBoundary{secrets.token_hex(8)}"
@@ -230,6 +242,7 @@ def detect_server_actions(
         body=body,
         proxy_profile=proxy_profile,
         correlation_id=correlation_id,
+        http_client=http_client,
     )
 
     if not scan.get("ok"):
@@ -357,6 +370,8 @@ def apply_server_actions_probe_results(
     fallback_html_signal_key: Optional[str] = None,
     set_defaults: bool = False,
     default_confidence: str = "medium",
+    http_client: Optional[HttpClient] = None,
+    action_endpoints: Optional[list[str]] = None,
 ) -> Dict[str, Any]:
     """
     Interpret a server actions probe and fold results into tags/signals.
@@ -372,6 +387,8 @@ def apply_server_actions_probe_results(
             payload_style=payload_style,
             proxy_profile=proxy_profile,
             correlation_id=correlation_id,
+            http_client=http_client,
+            action_endpoints=action_endpoints,
         )
 
     status = probe_result.get("status_code")

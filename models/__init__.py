@@ -20,12 +20,15 @@
 
 from .http import Headers, HttpRequest, HttpResponse, RetryConfig
 from .poc import PocRequest, PocResult, PocStatus
+from .report import ScanReport, VulnerabilityReport
 from .probe import ProbeRequest, ProbeResult
 from .scan import FrameworkDetectionResult, ScanRequest
 
 __all__ = [
     "FrameworkDetectionResult",
     "ScanRequest",
+    "ScanReport",
+    "VulnerabilityReport",
     "Headers",
     "HttpRequest",
     "HttpResponse",
