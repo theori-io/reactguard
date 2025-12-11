@@ -4,40 +4,89 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "reactguard"
-version = "0.5.1"
 description = "ReactGuard: React2Shell (CVE-2025-55182) scanner with framework + vulnerability detection for RSC stacks."
 readme = "README.md"
 requires-python = ">=3.10"
+license = { file = "LICENSE" }
 authors = [
-  { name = "Theori" }
+  { name = "Theori Inc." }
+]
+keywords = ["security", "react", "nextjs", "waku", "cve-2025-55182", "react2shell", "reactguard"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: GNU Affero General Public License v3 or later",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Security",
 ]
 dependencies = [
-  "httpx>=0.27,<0.28",
+  "httpx>=0.28.1,<0.29",
 ]
+dynamic = ["version"]
 
 [project.optional-dependencies]
 dev = [
-  "pytest>=7",
-  "ruff>=0.1.0",
-  "mypy>=1.6.0",
-  "black>=23.0",
-  "pyyaml>=6.0",
+  "black==25.12.0",
+  "build==1.3.0",
+  "mypy==1.19.0",
+  "pre-commit==4.5.0",
+  "pytest==9.0.2",
+  "pytest-cov==7.0.0",
+  "ruff==0.14.8",
 ]
 
 [project.scripts]
 reactguard = "reactguard.cli.main:main"
 
+[project.urls]
+Homepage = "https://reactguard.io/"
+Repository = "https://github.com/theori-io/reactguard"
+Issues = "https://github.com/theori-io/reactguard/issues"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+include-package-data = true
+
 [tool.setuptools.packages.find]
-where = [".."]
-include = ["reactguard", "reactguard.*"]
-exclude = ["reactguard.tests*"]
+where = ["src"]
+include = ["reactguard*"]
+
+[tool.setuptools.package-data]
+reactguard = ["py.typed"]
+
+[tool.setuptools.dynamic]
+version = {attr = "reactguard.version.__version__"}
 
 [tool.pytest.ini_options]
-testpaths = ["reactguard/tests"]
+addopts = "-ra --strict-config --strict-markers"
+pythonpath = ["src"]
+testpaths = ["tests"]
 
 [tool.ruff]
-line-length = 120
-select = ["E", "F", "I"]
+line-length = 180
+target-version = "py310"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "ISC", "W"]
+extend-ignore = ["E402"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["reactguard"]
 
 [tool.black]
-line-length = 100
+line-length = 180
+target-version = ["py310"]
+
+[tool.mypy]
+python_version = "3.10"
+files = ["src", "tests"]
+mypy_path = ["src"]
+ignore_missing_imports = true
+warn_unused_configs = true
+pretty = true
+show_error_codes = true

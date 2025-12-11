@@ -27,6 +27,6 @@ reactguard http://host:port/              # Framework + vulnerability detection 
 from reactguard import ReactGuard
 
 with ReactGuard() as rg:
-    scan = rg.scan("http://localhost:8080")
-    print(scan["status"])
+    scan = rg.scan("https://xint.io/")
+    print(scan)
 ```
