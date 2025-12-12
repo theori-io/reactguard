@@ -68,9 +68,6 @@ class ExpoDetector(FrameworkDetector):
             bundle_signals = probe_js_bundles(
                 context.url,
                 body,
-                proxy_profile=context.proxy_profile,
-                correlation_id=context.correlation_id,
-                http_client=context.http_client,
             )
             if bundle_signals.get("expo_router"):
                 signals["expo_router"] = True
@@ -88,13 +85,10 @@ class ExpoDetector(FrameworkDetector):
                 context.url,
                 tags=tags,
                 signals=signals,
-                proxy_profile=context.proxy_profile,
-                correlation_id=context.correlation_id,
                 rsc_tag="expo-rsc",
                 server_actions_tag="expo-server-actions",
                 server_actions_imply_rsc=True,
                 set_defaults=True,
-                http_client=context.http_client,
             )
 
             if rsc_result["rsc_endpoint_found"] or rsc_result["server_actions_enabled"]:
@@ -102,9 +96,6 @@ class ExpoDetector(FrameworkDetector):
 
             if rsc_result["server_actions_enabled"]:
                 signals["expo_server_actions_experimental"] = True
-
-        if is_expo and not context.url:
-            signals.setdefault("server_actions_enabled", False)
 
     def should_skip(self, tags: TagSet) -> bool:
         return "expo" in tags

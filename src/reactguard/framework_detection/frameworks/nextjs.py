@@ -38,7 +38,7 @@ from ..constants import (
     NEXTJS_STATIC_PATH_PATTERN,
 )
 from ..signals.server_actions import (
-    apply_server_actions_probe_results,
+    ServerActionsSignalApplier,
     probe_server_actions_support,
 )
 
@@ -122,24 +122,19 @@ class NextJSDetector(FrameworkDetector):
             sa_result = probe_server_actions_support(
                 context.url,
                 payload_style="multipart",
-                proxy_profile=context.proxy_profile,
-                correlation_id=context.correlation_id,
-                http_client=context.http_client,
             )
             probe_body = (sa_result.get("body") or sa_result.get("body_snippet") or "").lower()
             has_next_marker = sa_result.get("has_next_marker") or "__next_f" in probe_body or "__next_data__" in probe_body or "__next_f" in page_body_lower
-            apply_server_actions_probe_results(
-                probe_result=sa_result,
+            ServerActionsSignalApplier(
                 tags=tags,
                 signals=signals,
-                html_marker_hint=has_next_marker,
                 not_found_signal_key="nextjs_action_not_found",
                 vary_signal_key="nextjs_action_vary_rsc",
                 react_major_signal_key="detected_react_major",
                 rsc_flight_signal_key="rsc_flight_payload",
                 fallback_html_signal_key="nextjs_probe_html_with_next_marker",
                 default_confidence="medium",
-            )
+            ).apply(probe_result=sa_result, html_marker_hint=has_next_marker)
 
         if is_nextjs:
             tags.add("nextjs")

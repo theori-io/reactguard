@@ -21,9 +21,10 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 import re
 from urllib.parse import urljoin
 
-from ...config import load_http_settings
+from ...errors import categorize_exception
 from ...http import scan_with_retry
 from ...http.client import HttpClient
+from ...utils.context import scan_context
 from ..constants import (
     SERVER_ACTIONS_FLIGHT_PATTERN,
     WAKU_ACTION_ID_PATTERN_V021,
@@ -38,25 +39,14 @@ from ..constants import (
 )
 
 
-def probe_waku_rsc_surface(
-    base_url: str | None,
-    *,
-    proxy_profile: str | None = None,
-    correlation_id: str | None = None,
-    http_client: HttpClient | None = None,
-) -> bool:
+def _probe_waku_rsc_surface_ctx(base_url: str | None) -> bool:
     if not base_url:
         return False
 
     try:
-        timeout = load_http_settings().timeout
         resp = scan_with_retry(
             urljoin(base_url, "/RSC/_"),
             allow_redirects=True,
-            proxy_profile=proxy_profile,
-            correlation_id=correlation_id,
-            timeout=timeout,
-            http_client=http_client,
         )
         if not resp.get("ok"):
             return False
@@ -73,6 +63,19 @@ def probe_waku_rsc_surface(
         return False
 
 
+def probe_waku_rsc_surface(
+    base_url: str | None,
+    *,
+    proxy_profile: str | None = None,
+    correlation_id: str | None = None,
+    http_client: HttpClient | None = None,
+) -> bool:
+    if proxy_profile is not None or correlation_id is not None or http_client is not None:
+        with scan_context(proxy_profile=proxy_profile, correlation_id=correlation_id, http_client=http_client):
+            return _probe_waku_rsc_surface_ctx(base_url)
+    return _probe_waku_rsc_surface_ctx(base_url)
+
+
 def probe_waku_minimal_html(
     body: str,
     base_url: str | None,
@@ -81,6 +84,13 @@ def probe_waku_minimal_html(
     correlation_id: str | None = None,
     http_client: HttpClient | None = None,
 ) -> bool:
+    if proxy_profile is not None or correlation_id is not None or http_client is not None:
+        with scan_context(proxy_profile=proxy_profile, correlation_id=correlation_id, http_client=http_client):
+            return _probe_waku_minimal_html_ctx(body, base_url)
+    return _probe_waku_minimal_html_ctx(body, base_url)
+
+
+def _probe_waku_minimal_html_ctx(body: str, base_url: str | None) -> bool:
     minimal_pattern = WAKU_MINIMAL_HTML_PATTERN.search(body.strip())
     if not minimal_pattern:
         return False
@@ -89,14 +99,9 @@ def probe_waku_minimal_html(
         return False
 
     try:
-        timeout = load_http_settings().timeout
         resp = scan_with_retry(
             urljoin(base_url, "/RSC/"),
             allow_redirects=True,
-            proxy_profile=proxy_profile,
-            correlation_id=correlation_id,
-            timeout=timeout,
-            http_client=http_client,
         )
         status = resp.get("status_code", 0)
         content_type = (resp.get("headers") or {}).get("content-type", "")
@@ -108,29 +113,29 @@ def probe_waku_minimal_html(
         return False
 
 
-def probe_waku_server_actions(
+def _probe_waku_server_actions_ctx(
     base_url: str | None,
-    *,
-    proxy_profile: str | None = None,
-    correlation_id: str | None = None,
-    http_client: HttpClient | None = None,
-) -> tuple[bool, int] | tuple[bool, int, list[tuple[str, str]]]:
+) -> tuple[bool, int] | tuple[bool, int, list[tuple[str, str]]] | tuple[bool, int, list[tuple[str, str]], dict[str, str | int | None]]:
     if not base_url:
         return False, 0
 
     endpoints: list[tuple[str, str]] = []
-    timeout = load_http_settings().timeout
 
     try:
         scan = scan_with_retry(
             base_url,
-            proxy_profile=proxy_profile,
-            correlation_id=correlation_id,
-            timeout=timeout,
-            http_client=http_client,
         )
         if not scan.get("ok"):
-            return False, 0
+            return (
+                False,
+                0,
+                [],
+                {
+                    "error_category": scan.get("error_category"),
+                    "error_message": scan.get("error_message"),
+                    "status_code": scan.get("status_code"),
+                },
+            )
 
         body = scan.get("body") or scan.get("body_snippet", "")
 
@@ -189,10 +194,6 @@ def probe_waku_server_actions(
                 js_url = urljoin(base_url, js_path)
                 js_scan = scan_with_retry(
                     js_url,
-                    proxy_profile=proxy_profile,
-                    correlation_id=correlation_id,
-                    timeout=timeout,
-                    http_client=http_client,
                 )
                 if not js_scan.get("ok"):
                     continue
@@ -215,5 +216,24 @@ def probe_waku_server_actions(
         count = len(endpoints)
         return (has_actions, count, endpoints)
 
-    except Exception:
-        return False, 0
+    except Exception as exc:  # noqa: BLE001
+        category = categorize_exception(exc).value
+        return (
+            False,
+            0,
+            [],
+            {"error_category": category, "error_message": str(exc), "error_type": exc.__class__.__name__},
+        )
+
+
+def probe_waku_server_actions(
+    base_url: str | None,
+    *,
+    proxy_profile: str | None = None,
+    correlation_id: str | None = None,
+    http_client: HttpClient | None = None,
+) -> tuple[bool, int] | tuple[bool, int, list[tuple[str, str]]] | tuple[bool, int, list[tuple[str, str]], dict[str, str | int | None]]:
+    if proxy_profile is not None or correlation_id is not None or http_client is not None:
+        with scan_context(proxy_profile=proxy_profile, correlation_id=correlation_id, http_client=http_client):
+            return _probe_waku_server_actions_ctx(base_url)
+    return _probe_waku_server_actions_ctx(base_url)

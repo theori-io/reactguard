@@ -59,6 +59,21 @@ def test_framework_detection_engine_fetch_error(monkeypatch):
     assert result.signals["fetch_error_category"] == "TIMEOUT"
 
 
+def test_normalize_headers_merges_response_headers():
+    request = ScanRequest(url="http://example", response_headers={"X-Test": "client", "X-Only-Offline": "1"})
+    response = HttpResponse(
+        ok=True,
+        status_code=200,
+        headers={"X-Test": "server", "X-Nextjs-Version": "15.0.0"},
+        text="",
+        url="http://example",
+    )
+    normalized = FrameworkDetectionEngine._normalize_headers(request, response)
+    assert normalized["x-nextjs-version"] == "15.0.0"
+    assert normalized["x-test"] == "server"
+    assert normalized["x-only-offline"] == "1"
+
+
 def test_apply_rsc_flags_marks_dependency_only():
     tags = TagSet()
     signals = {"react_bundle": True, "rsc_endpoint_found": False}

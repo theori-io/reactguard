@@ -31,6 +31,7 @@ from ..http import (
 from ..http.client import HttpClient
 from ..models import FrameworkDetectionResult, ScanRequest
 from ..utils import TagSet, extract_versions
+from ..utils.context import scan_context
 from .base import DetectionContext
 from .registry import DETECTORS
 from .scoring import score_confidence
@@ -45,21 +46,26 @@ class FrameworkDetectionEngine:
         self.http_client = http_client or create_default_http_client()
 
     def detect(self, request: ScanRequest) -> FrameworkDetectionResult:
-        response = request.response or self._fetch(request)
-        signals = self._initial_signals(response)
-        if response and response.url:
-            signals["final_url"] = response.url
-        headers = self._normalize_headers(request, response)
-        body = self._resolve_body(request, response)
-        tags = TagSet()
-        context = self._build_context(request, response)
+        with scan_context(
+            proxy_profile=request.proxy_profile,
+            correlation_id=request.correlation_id,
+            http_client=self.http_client,
+        ):
+            response = request.response or self._fetch(request)
+            signals = self._initial_signals(response)
+            if response and response.url:
+                signals["final_url"] = response.url
+            headers = self._normalize_headers(request, response)
+            body = self._resolve_body(request, response)
+            tags = TagSet()
+            context = self._build_context(request, response)
 
-        signals.update(self._collect_version_signals(headers, body))
-        self._run_detectors(body, headers, tags, signals, context)
-        self._apply_confidence(signals)
-        self._apply_rsc_flags(tags, signals)
+            signals.update(self._collect_version_signals(headers, body))
+            self._run_detectors(body, headers, tags, signals, context)
+            self._apply_confidence(signals)
+            self._apply_rsc_flags(tags, signals)
 
-        return FrameworkDetectionResult(tags=tags.to_list(), signals=signals)
+            return FrameworkDetectionResult(tags=tags.to_list(), signals=signals)
 
     def _fetch(self, request: ScanRequest):
         if not request.url:
@@ -68,7 +74,7 @@ class FrameworkDetectionEngine:
         http_request = HttpRequest(
             url=request.url,
             method="GET",
-            headers=request.headers,
+            headers=request.request_headers,
             allow_redirects=True,
             proxy=request.proxy_profile,
             correlation_id=request.correlation_id,
@@ -95,8 +101,13 @@ class FrameworkDetectionEngine:
 
     @staticmethod
     def _normalize_headers(request: ScanRequest, response) -> dict[str, str]:
-        raw_headers = request.headers or (response.headers if response else {})
-        return {k.lower(): v for k, v in (raw_headers or {}).items()}
+        raw_headers: dict[str, str] = {}
+        if request.response_headers:
+            raw_headers.update(request.response_headers)
+        if response and response.headers:
+            # Response headers should take precedence over any offline overrides.
+            raw_headers.update(response.headers)
+        return {k.lower(): v for k, v in raw_headers.items()}
 
     @staticmethod
     def _resolve_body(request: ScanRequest, response) -> str:

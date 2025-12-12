@@ -74,6 +74,9 @@ class ScanReport:
             "vulnerability_detection": self.vulnerability_detection.to_dict(),
         }
 
+    def __contains__(self, item: str) -> bool:
+        return item in self.to_dict()
+
     @classmethod
     def from_parts(
         cls,

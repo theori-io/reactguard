@@ -90,9 +90,6 @@ class WakuDetector(FrameworkDetector):
         if context.url and probe_waku_minimal_html(
             body,
             context.url,
-            proxy_profile=context.proxy_profile,
-            correlation_id=context.correlation_id,
-            http_client=context.http_client,
         ):
             is_waku = True
             signals["waku_minimal_html"] = True
@@ -101,9 +98,6 @@ class WakuDetector(FrameworkDetector):
         if context.url and not has_rsc_surface:
             if probe_waku_rsc_surface(
                 context.url,
-                proxy_profile=context.proxy_profile,
-                correlation_id=context.correlation_id,
-                http_client=context.http_client,
             ):
                 is_waku = True
                 signals["waku_rsc_surface"] = True
@@ -112,9 +106,6 @@ class WakuDetector(FrameworkDetector):
         if is_waku and context.url:
             action_probe = probe_waku_server_actions(
                 context.url,
-                proxy_profile=context.proxy_profile,
-                correlation_id=context.correlation_id,
-                http_client=context.http_client,
             )
             if isinstance(action_probe, tuple):
                 has_actions = bool(action_probe[0])

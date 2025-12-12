@@ -33,6 +33,11 @@ class ScanRequest:
 
     Either `url` or a pre-fetched `response` must be supplied. Proxy and correlation
     metadata propagate through to all probes.
+
+    - `request_headers` are sent with outbound HTTP requests.
+    - `response_headers` are optional headers to use for detection when a response
+      object is not available (offline/fixture scans).
+    - `headers` is a deprecated alias for `response_headers`, kept for backwards compatibility.
     """
 
     url: str | None = None
@@ -40,7 +45,14 @@ class ScanRequest:
     proxy_profile: str | None = None
     correlation_id: str | None = None
     body: str | None = None
+    request_headers: dict[str, str] | None = None
+    response_headers: dict[str, str] | None = None
     headers: dict[str, str] | None = None
+
+    def __post_init__(self) -> None:
+        # Backwards-compatible mapping for legacy callers that still pass `headers=`.
+        if self.headers and self.request_headers is None and self.response_headers is None:
+            self.response_headers = dict(self.headers)
 
 
 @dataclass

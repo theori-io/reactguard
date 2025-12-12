@@ -23,7 +23,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 import time
 
 from ..config import load_http_settings
-from ..errors import ErrorCategory
+from ..errors import ErrorCategory, categorize_exception
 from .client import HttpClient
 from .models import HttpRequest, HttpResponse, RetryConfig
 
@@ -66,7 +66,16 @@ def send_with_retries(
     while attempt < cfg.max_attempts:
         if deadline is not None and time.monotonic() >= deadline:
             break
-        response = client.request(request)
+        try:
+            response = client.request(request)
+        except Exception as exc:  # noqa: BLE001
+            category = categorize_exception(exc).value
+            response = HttpResponse(
+                ok=False,
+                error_category=category,
+                error_message=str(exc),
+                error_type=exc.__class__.__name__,
+            )
         last_response = response
 
         if response.ok:
