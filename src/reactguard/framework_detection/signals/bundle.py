@@ -23,6 +23,7 @@ from urllib.parse import urljoin, urlparse
 
 from ...http import scan_with_retry
 from ...http.client import HttpClient
+from ...utils.context import scan_context
 
 
 def extract_js_urls(body: str, base_url: str) -> list[str]:
@@ -84,15 +85,7 @@ def extract_js_urls(body: str, base_url: str) -> list[str]:
     return sorted_urls[:20]
 
 
-def probe_js_bundles(
-    url: str,
-    body: str,
-    *,
-    timeout: float | None = None,
-    proxy_profile: str | None = None,
-    correlation_id: str | None = None,
-    http_client: HttpClient | None = None,
-) -> dict[str, bool]:
+def _probe_js_bundles_ctx(url: str, body: str) -> dict[str, bool]:
     signals: dict[str, bool] = {}
 
     all_js_urls = extract_js_urls(body, url)
@@ -100,11 +93,7 @@ def probe_js_bundles(
     for script_src in all_js_urls:
         scan = scan_with_retry(
             script_src,
-            timeout=timeout,
             allow_redirects=True,
-            proxy_profile=proxy_profile,
-            correlation_id=correlation_id,
-            http_client=http_client,
         )
         if not scan.get("ok") or scan.get("status_code") != 200:
             continue
@@ -151,3 +140,23 @@ def probe_js_bundles(
             break
 
     return signals
+
+
+def probe_js_bundles(
+    url: str,
+    body: str,
+    *,
+    timeout: float | None = None,
+    proxy_profile: str | None = None,
+    correlation_id: str | None = None,
+    http_client: HttpClient | None = None,
+) -> dict[str, bool]:
+    if timeout is not None or proxy_profile is not None or correlation_id is not None or http_client is not None:
+        with scan_context(
+            timeout=timeout,
+            proxy_profile=proxy_profile,
+            correlation_id=correlation_id,
+            http_client=http_client,
+        ):
+            return _probe_js_bundles_ctx(url, body)
+    return _probe_js_bundles_ctx(url, body)

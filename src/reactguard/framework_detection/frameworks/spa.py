@@ -76,9 +76,6 @@ class SPADetector(FrameworkDetector):
             bundle_signals = probe_js_bundles(
                 context.url,
                 body,
-                proxy_profile=context.proxy_profile,
-                correlation_id=context.correlation_id,
-                http_client=context.http_client,
             )
             if bundle_signals.get("react_bundle"):
                 spa_signals += 1

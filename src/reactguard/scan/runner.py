@@ -38,14 +38,11 @@ class ScanRunner:
 
     def run(self, request: ScanRequest) -> ScanReport:
         detection_result: FrameworkDetectionResult = self.detection_engine.detect(request)
-        target_url = detection_result.signals.get("final_url") or request.url
+        target_url = str(detection_result.signals.get("final_url") or request.url or "")
 
         vulnerability_result = self.vulnerability_runner.run(
             target_url,
-            proxy_profile=request.proxy_profile,
-            correlation_id=request.correlation_id,
             detection_result=detection_result,
-            scan_request=request,
         )
 
         return build_scan_report(detection_result, vulnerability_result)

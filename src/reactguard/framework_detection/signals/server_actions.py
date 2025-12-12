@@ -21,6 +21,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """Server Actions probing helpers (httpx-backed)."""
 
 import secrets
+from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urljoin
 
@@ -30,6 +31,7 @@ from ...http import scan_with_retry
 from ...http.client import HttpClient
 from ...utils import TagSet
 from ...utils.actions import generate_action_id
+from ...utils.context import scan_context
 from ..constants import (
     FRAMEWORK_HTML_MARKERS,
     SERVER_ACTIONS_ACTION_KEYWORDS,
@@ -43,20 +45,129 @@ from ..constants import (
 )
 
 
+@dataclass
+class ServerActionsSignalApplier:
+    """Stateful applier for folding server action probe results into tags/signals."""
+
+    tags: TagSet
+    signals: dict[str, Any]
+    base_url: str | None = None
+    action_header: str = SERVER_ACTIONS_DEFAULT_ACTION_HEADER
+    payload_style: str = "multipart"
+    server_actions_tag: str | None = None
+    not_found_signal_key: str | None = None
+    vary_signal_key: str | None = None
+    react_major_signal_key: str | None = None
+    rsc_flight_signal_key: str | None = None
+    fallback_html_signal_key: str | None = None
+    set_defaults: bool = False
+    default_confidence: str = "medium"
+    action_endpoints: list[str] | None = None
+
+    def apply(
+        self,
+        probe_result: dict[str, Any] | None = None,
+        *,
+        html_marker_hint: bool = False,
+        proxy_profile: str | None = None,
+        correlation_id: str | None = None,
+        http_client: HttpClient | None = None,
+    ) -> dict[str, Any]:
+        if probe_result is None:
+            if proxy_profile is not None or correlation_id is not None or http_client is not None:
+                with scan_context(proxy_profile=proxy_profile, correlation_id=correlation_id, http_client=http_client):
+                    probe_result = _probe_server_actions_support_ctx(
+                        self.base_url or "",
+                        action_header=self.action_header,
+                        payload_style=self.payload_style,
+                        action_endpoints=self.action_endpoints,
+                    )
+            else:
+                probe_result = _probe_server_actions_support_ctx(
+                    self.base_url or "",
+                    action_header=self.action_header,
+                    payload_style=self.payload_style,
+                    action_endpoints=self.action_endpoints,
+                )
+
+        status = probe_result.get("status_code")
+        has_framework_marker = bool(probe_result.get("has_framework_html_marker") or probe_result.get("has_next_marker") or html_marker_hint)
+        has_action_keywords = bool(probe_result.get("has_action_keywords"))
+        has_action_content_type = bool(probe_result.get("has_action_content_type"))
+        has_flight_marker = bool(probe_result.get("has_flight_marker"))
+        has_digest = bool(probe_result.get("has_digest"))
+        is_html = bool(probe_result.get("is_html"))
+        action_not_found = bool(probe_result.get("action_not_found_header") or probe_result.get("action_not_found_body"))
+        vary_has_rsc = bool(probe_result.get("vary_has_rsc"))
+        flight_format = probe_result.get("flight_format")
+        react_major_from_flight = probe_result.get("react_major_from_flight")
+
+        supported = bool(probe_result.get("supported"))
+        confidence = probe_result.get("confidence") or self.default_confidence
+
+        strong_rsc_signal = has_action_content_type or has_flight_marker or has_digest
+
+        if self.not_found_signal_key and action_not_found:
+            self.signals[self.not_found_signal_key] = True
+
+        # Only promote "action not found" when paired with strong RSC evidence; plain 404 text should stay unknown.
+        if action_not_found and strong_rsc_signal:
+            supported = True
+            confidence = "high"
+
+        if not supported:
+            if strong_rsc_signal:
+                supported = True
+            elif status in (400, 404, 500) and has_action_keywords and has_framework_marker:
+                supported = True
+            elif is_html and has_action_keywords and has_framework_marker and status in (400, 404, 500, 200):
+                supported = True
+
+        if flight_format in {"object", "array"} and self.rsc_flight_signal_key:
+            self.signals[self.rsc_flight_signal_key] = True
+
+        if self.react_major_signal_key and react_major_from_flight is not None and self.signals.get(self.react_major_signal_key) is None:
+            self.signals[self.react_major_signal_key] = react_major_from_flight
+            self.signals.setdefault(f"{self.react_major_signal_key}_confidence", "medium")
+
+        if self.vary_signal_key and vary_has_rsc:
+            self.signals[self.vary_signal_key] = True
+
+        if supported:
+            self.signals["server_actions_enabled"] = True
+            self.signals["server_actions_confidence"] = confidence
+            if self.server_actions_tag:
+                self.tags.add(self.server_actions_tag)
+        elif status in (404, 405) and not action_not_found:
+            self.signals["server_actions_enabled"] = False
+            self.signals["server_actions_confidence"] = "high"
+        elif is_html and has_framework_marker:
+            self.signals["server_actions_enabled"] = False
+            self.signals["server_actions_confidence"] = "low"
+            if self.fallback_html_signal_key:
+                self.signals[self.fallback_html_signal_key] = True
+        elif self.set_defaults:
+            self.signals.setdefault("server_actions_enabled", None)
+            self.signals.setdefault("server_actions_confidence", "none")
+
+        return {
+            "supported": supported,
+            "confidence": self.signals.get("server_actions_confidence"),
+            "status_code": status,
+            "probe_result": probe_result,
+        }
+
+
 def _user_agent() -> str:
     return load_http_settings().user_agent
 
 
-def probe_server_actions_support(
+def _probe_server_actions_support_ctx(
     base_url: str,
     *,
     action_id: str = "probe",
     action_header: str = SERVER_ACTIONS_DEFAULT_ACTION_HEADER,
     payload_style: str = "plain",
-    proxy_profile: str | None = None,
-    correlation_id: str | None = None,
-    timeout: float | None = None,
-    http_client: HttpClient | None = None,
     action_endpoints: list[str] | None = None,
 ) -> dict[str, Any]:
     if not base_url:
@@ -102,10 +213,6 @@ def probe_server_actions_support(
         method="POST",
         headers=headers,
         body=body,
-        proxy_profile=proxy_profile,
-        correlation_id=correlation_id,
-        timeout=timeout,
-        http_client=http_client,
     )
 
     headers_lower = {k.lower(): v for k, v in (resp.get("headers") or {}).items()}
@@ -190,12 +297,45 @@ def probe_server_actions_support(
     }
 
 
-def detect_server_actions(
-    url: str,
+def probe_server_actions_support(
+    base_url: str,
+    *,
+    action_id: str = "probe",
+    action_header: str = SERVER_ACTIONS_DEFAULT_ACTION_HEADER,
+    payload_style: str = "plain",
     proxy_profile: str | None = None,
     correlation_id: str | None = None,
-    action_header: str = SERVER_ACTIONS_DEFAULT_ACTION_HEADER,
+    timeout: float | None = None,
     http_client: HttpClient | None = None,
+    action_endpoints: list[str] | None = None,
+) -> dict[str, Any]:
+    if proxy_profile is not None or correlation_id is not None or timeout is not None or http_client is not None:
+        with scan_context(
+            proxy_profile=proxy_profile,
+            correlation_id=correlation_id,
+            timeout=timeout,
+            http_client=http_client,
+        ):
+            return _probe_server_actions_support_ctx(
+                base_url,
+                action_id=action_id,
+                action_header=action_header,
+                payload_style=payload_style,
+                action_endpoints=action_endpoints,
+            )
+    return _probe_server_actions_support_ctx(
+        base_url,
+        action_id=action_id,
+        action_header=action_header,
+        payload_style=payload_style,
+        action_endpoints=action_endpoints,
+    )
+
+
+def _detect_server_actions_ctx(
+    url: str,
+    *,
+    action_header: str = SERVER_ACTIONS_DEFAULT_ACTION_HEADER,
 ) -> dict[str, Any]:
     action_id = generate_action_id()
     boundary = f"----FormBoundary{secrets.token_hex(8)}"
@@ -221,9 +361,6 @@ def detect_server_actions(
         method="POST",
         headers=headers,
         body=body,
-        proxy_profile=proxy_profile,
-        correlation_id=correlation_id,
-        http_client=http_client,
     )
 
     if not scan.get("ok"):
@@ -332,6 +469,19 @@ def detect_server_actions(
     }
 
 
+def detect_server_actions(
+    url: str,
+    proxy_profile: str | None = None,
+    correlation_id: str | None = None,
+    action_header: str = SERVER_ACTIONS_DEFAULT_ACTION_HEADER,
+    http_client: HttpClient | None = None,
+) -> dict[str, Any]:
+    if proxy_profile is not None or correlation_id is not None or http_client is not None:
+        with scan_context(proxy_profile=proxy_profile, correlation_id=correlation_id, http_client=http_client):
+            return _detect_server_actions_ctx(url, action_header=action_header)
+    return _detect_server_actions_ctx(url, action_header=action_header)
+
+
 def apply_server_actions_probe_results(
     *,
     base_url: str | None = None,
@@ -361,83 +511,29 @@ def apply_server_actions_probe_results(
     - Applies standard heuristics (action keywords + framework markers, RSC content, etc.).
     - Optionally tags, sets defaults, and records framework-specific signal keys.
     """
-    if probe_result is None:
-        probe_result = probe_server_actions_support(
-            base_url or "",
-            action_header=action_header,
-            payload_style=payload_style,
-            proxy_profile=proxy_profile,
-            correlation_id=correlation_id,
-            http_client=http_client,
-            action_endpoints=action_endpoints,
-        )
-
-    status = probe_result.get("status_code")
-    has_framework_marker = bool(probe_result.get("has_framework_html_marker") or probe_result.get("has_next_marker") or html_marker_hint)
-    has_action_keywords = bool(probe_result.get("has_action_keywords"))
-    has_action_content_type = bool(probe_result.get("has_action_content_type"))
-    has_flight_marker = bool(probe_result.get("has_flight_marker"))
-    has_digest = bool(probe_result.get("has_digest"))
-    is_html = bool(probe_result.get("is_html"))
-    action_not_found = bool(probe_result.get("action_not_found_header") or probe_result.get("action_not_found_body"))
-    vary_has_rsc = bool(probe_result.get("vary_has_rsc"))
-    flight_format = probe_result.get("flight_format")
-    react_major_from_flight = probe_result.get("react_major_from_flight")
-
-    supported = bool(probe_result.get("supported"))
-    confidence = probe_result.get("confidence") or default_confidence
-
-    strong_rsc_signal = has_action_content_type or has_flight_marker or has_digest
-
-    if not_found_signal_key and action_not_found:
-        signals[not_found_signal_key] = True
-
-    # Only promote "action not found" when paired with strong RSC evidence; plain 404 text should stay unknown.
-    if action_not_found and strong_rsc_signal:
-        supported = True
-        confidence = "high"
-
-    if not supported:
-        if strong_rsc_signal:
-            supported = True
-        elif status in (400, 404, 500) and has_action_keywords and has_framework_marker:
-            supported = True
-        elif is_html and has_action_keywords and has_framework_marker and status in (400, 404, 500, 200):
-            supported = True
-
-    if flight_format in {"object", "array"} and rsc_flight_signal_key:
-        signals[rsc_flight_signal_key] = True
-
-    if react_major_signal_key and react_major_from_flight is not None and signals.get(react_major_signal_key) is None:
-        signals[react_major_signal_key] = react_major_from_flight
-        signals.setdefault(f"{react_major_signal_key}_confidence", "medium")
-
-    if vary_signal_key and vary_has_rsc:
-        signals[vary_signal_key] = True
-
-    if supported:
-        signals["server_actions_enabled"] = True
-        signals["server_actions_confidence"] = confidence
-        if server_actions_tag:
-            tags.add(server_actions_tag)
-    elif status in (404, 405) and not action_not_found:
-        signals["server_actions_enabled"] = False
-        signals["server_actions_confidence"] = "high"
-    elif is_html and has_framework_marker:
-        signals["server_actions_enabled"] = False
-        signals["server_actions_confidence"] = "low"
-        if fallback_html_signal_key:
-            signals[fallback_html_signal_key] = True
-    elif set_defaults:
-        signals.setdefault("server_actions_enabled", None)
-        signals.setdefault("server_actions_confidence", "none")
-
-    return {
-        "supported": supported,
-        "confidence": signals.get("server_actions_confidence"),
-        "status_code": status,
-        "probe_result": probe_result,
-    }
+    applier = ServerActionsSignalApplier(
+        tags=tags,
+        signals=signals,
+        base_url=base_url,
+        action_header=action_header,
+        payload_style=payload_style,
+        server_actions_tag=server_actions_tag,
+        not_found_signal_key=not_found_signal_key,
+        vary_signal_key=vary_signal_key,
+        react_major_signal_key=react_major_signal_key,
+        rsc_flight_signal_key=rsc_flight_signal_key,
+        fallback_html_signal_key=fallback_html_signal_key,
+        set_defaults=set_defaults,
+        default_confidence=default_confidence,
+        action_endpoints=action_endpoints,
+    )
+    return applier.apply(
+        probe_result=probe_result,
+        html_marker_hint=html_marker_hint,
+        proxy_profile=proxy_profile,
+        correlation_id=correlation_id,
+        http_client=http_client,
+    )
 
 
 __all__ = [

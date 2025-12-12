@@ -64,7 +64,7 @@ class TestProtoProbe(unittest.TestCase):
             return {"ok": True, "status_code": 200}
 
         actions = ["act1", "act2"]
-        probe_results, control_result, errors = run_action_probes(
+        probe_results, control_result = run_action_probes(
             "http://localhost",
             actions,
             action_probe=fake_probe,
@@ -73,7 +73,7 @@ class TestProtoProbe(unittest.TestCase):
 
         self.assertEqual([r["action_id"] for r in probe_results], actions)
         self.assertEqual(control_result.get("action_id"), "control_probe")
-        self.assertIn("TIMEOUT", errors)
+        self.assertEqual(probe_results[0].get("error_category"), "TIMEOUT")
 
 
 if __name__ == "__main__":

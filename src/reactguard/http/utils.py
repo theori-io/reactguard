@@ -18,28 +18,40 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 """Shared HTTP helpers for scans and probes."""
 
+import logging
 from typing import Any
 
 from ..config import DEFAULT_USER_AGENT, load_http_settings
 from ..errors import ErrorCategory
+from ..utils.context import get_scan_context
 from .client import HttpClient, create_default_http_client
 from .models import HttpRequest
 from .retry import send_with_retries
 
 _shared_http_client: HttpClient | None = None
 
+logger = logging.getLogger(__name__)
+
 
 def set_shared_http_client(client: HttpClient) -> None:
-    """Inject a shared HttpClient instance (used by framework/vulnerability probes)."""
+    """Inject a shared HttpClient instance (deprecated; prefer ScanContext.http_client)."""
+    context = get_scan_context()
+    if context.http_client is None:
+        logger.debug("set_shared_http_client is deprecated; set ScanContext.http_client or pass http_client explicitly.")
     global _shared_http_client
     _shared_http_client = client
 
 
 def get_http_client(refresh: bool = False) -> HttpClient:
-    """Return shared HttpClient instance."""
+    """Return the current HttpClient, preferring ScanContext over globals."""
+    context = get_scan_context()
+    if context.http_client is not None and not refresh:
+        return context.http_client
     global _shared_http_client
     if _shared_http_client is None or refresh:
         _shared_http_client = create_default_http_client(load_http_settings())
+    if context.http_client is None:
+        logger.debug("Using deprecated shared HTTP client fallback; prefer ScanContext.http_client.")
     return _shared_http_client
 
 
@@ -57,10 +69,13 @@ def scan_with_retry(
 ) -> dict[str, Any]:
     """Execute an HTTP request with retries and return a normalized mapping."""
     settings = load_http_settings()
+    context = get_scan_context()
     request_headers = dict(headers or {})
     request_headers.setdefault("User-Agent", settings.user_agent)
-    client = http_client or get_http_client()
-    effective_timeout = timeout if timeout is not None else settings.timeout
+    effective_proxy_profile = proxy_profile if proxy_profile is not None else context.proxy_profile
+    effective_correlation_id = correlation_id if correlation_id is not None else context.correlation_id
+    client = http_client or context.http_client or get_http_client()
+    effective_timeout = timeout if timeout is not None else (context.timeout if context.timeout is not None else settings.timeout)
 
     request = HttpRequest(
         url=url,
@@ -69,8 +84,8 @@ def scan_with_retry(
         body=body,
         timeout=effective_timeout,
         allow_redirects=allow_redirects,
-        proxy=proxy_profile,
-        correlation_id=correlation_id,
+        proxy=effective_proxy_profile,
+        correlation_id=effective_correlation_id,
     )
 
     response = send_with_retries(client, request)

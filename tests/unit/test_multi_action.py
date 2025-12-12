@@ -3,6 +3,7 @@ import unittest
 
 from reactguard.models.poc import PocStatus
 from reactguard.vulnerability_detection.interpreters import analyze_multi_action_results
+from reactguard.vulnerability_detection.journal import PocJournal, journal_context
 
 
 class TestMultiActionInterpreter(unittest.TestCase):
@@ -106,6 +107,27 @@ class TestMultiActionInterpreter(unittest.TestCase):
 
         self.assertEqual(result["status"], PocStatus.INCONCLUSIVE)
         self.assertIn("only one probe result", result["details"]["reason"].lower())
+
+    def test_uses_ambient_journal_when_none_provided(self):
+        probe_results = [
+            {
+                "action_id": "40aaaa",
+                "status_code": 404,
+                "body_snippet": "Action not found",
+                "headers": {"content-type": "text/html"},
+            }
+        ]
+
+        ambient = PocJournal()
+        with journal_context(ambient):
+            result = analyze_multi_action_results(
+                probe_results,
+                action_ids=["40aaaa"],
+                is_rsc_framework=True,
+            )
+
+        self.assertGreater(len(ambient.entries), 0)
+        self.assertEqual(result["raw_data"]["journal"], ambient.to_list())
 
 
 if __name__ == "__main__":

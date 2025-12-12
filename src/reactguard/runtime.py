@@ -31,6 +31,7 @@ from .models import (
     VulnerabilityReport,
 )
 from .scan.runner import ScanRunner
+from .utils.context import scan_context
 from .vulnerability_detection.runner import VulnerabilityDetectionRunner
 
 
@@ -59,8 +60,8 @@ class ReactGuard:
         headers: dict[str, str] | None = None,
         body: str | None = None,
     ) -> FrameworkDetectionResult:
-        if request_headers is None and headers is not None:
-            request_headers = headers
+        if response_headers is None and headers is not None:
+            response_headers = headers
         request = ScanRequest(
             url=url,
             proxy_profile=proxy_profile,
@@ -69,7 +70,8 @@ class ReactGuard:
             response_headers=response_headers,
             body=body,
         )
-        return self.detection_engine.detect(request)
+        with scan_context(proxy_profile=proxy_profile, correlation_id=correlation_id, http_client=self.http_client):
+            return self.detection_engine.detect(request)
 
     def vuln(
         self,
@@ -79,12 +81,13 @@ class ReactGuard:
         correlation_id: str | None = None,
         detection_result: FrameworkDetectionResult | None = None,
     ) -> VulnerabilityReport:
-        result = self.vulnerability_runner.run(
-            url,
-            proxy_profile=proxy_profile,
-            correlation_id=correlation_id,
-            detection_result=detection_result,
-        )
+        with scan_context(proxy_profile=proxy_profile, correlation_id=correlation_id, http_client=self.http_client):
+            result = self.vulnerability_runner.run(
+                url,
+                proxy_profile=proxy_profile,
+                correlation_id=correlation_id,
+                detection_result=detection_result,
+            )
         if isinstance(result, VulnerabilityReport):
             return result
         return VulnerabilityReport.from_mapping(result)
@@ -97,7 +100,8 @@ class ReactGuard:
         correlation_id: str | None = None,
     ) -> ScanReport:
         request = ScanRequest(url=url, proxy_profile=proxy_profile, correlation_id=correlation_id)
-        return self.scan_runner.run(request)
+        with scan_context(proxy_profile=proxy_profile, correlation_id=correlation_id, http_client=self.http_client):
+            return self.scan_runner.run(request)
 
     def close(self) -> None:
         with suppress(Exception):

@@ -18,27 +18,28 @@ class TestNextJSAssessor(unittest.TestCase):
         with (
             patch("reactguard.vulnerability_detection.assessors.nextjs.generate_action_ids", return_value=fake_actions),
             patch(
-                "reactguard.vulnerability_detection.assessors.nextjs.run_action_probes",
+                "reactguard.vulnerability_detection.assessors.nextjs.ActionProbeRunner.run",
                 return_value=(
                     [{"status_code": 500, "body": "err", "headers": {}, "body_snippet": "err"}] * 3,
                     {"status_code": 200, "body": "ok", "headers": {}, "body_snippet": "ok"},
-                    set(),
                 ),
             ) as run_probes,
-            patch(
-                "reactguard.vulnerability_detection.assessors.nextjs.analyze_multi_action_results",
-                return_value={"status": PocStatus.LIKELY_NOT_VULNERABLE, "details": {"confidence": "medium", "reason": "react 18"}, "raw_data": {}},
-            ) as analyze,
+            patch("reactguard.vulnerability_detection.assessors.nextjs.MultiActionAnalyzer") as analyzer_cls,
         ):
+            analyzer_cls.return_value.analyze.return_value = {
+                "status": PocStatus.LIKELY_NOT_VULNERABLE,
+                "details": {"confidence": "medium", "reason": "react 18"},
+                "raw_data": {},
+            }
             result = assessor.evaluate(
                 base_url="http://localhost",
                 detected_versions={"react_version": "18.2.0"},
                 detect_context={"react_major": 18, "signals": {"rsc_endpoint_found": True}},
             )
         run_probes.assert_called_once()
-        analyze.assert_called_once()
+        analyzer_cls.return_value.analyze.assert_called_once()
         self.assertEqual(result["status"], PocStatus.LIKELY_NOT_VULNERABLE)
-        self.assertEqual(analyze.call_args.kwargs["react_major"], 18)
+        self.assertEqual(analyzer_cls.call_args.kwargs["react_major"], 18)
 
     def test_analyzer_called_with_action_ids(self):
         assessor = NextJSAssessor()
@@ -53,11 +54,9 @@ class TestNextJSAssessor(unittest.TestCase):
                 "reactguard.vulnerability_detection.assessors.nextjs.send_control_probe",
                 return_value={"ok": True, "status_code": 200, "headers": {}, "body_snippet": "ok"},
             ) as control,
-            patch(
-                "reactguard.vulnerability_detection.assessors.nextjs.analyze_multi_action_results",
-                return_value={"status": PocStatus.NOT_VULNERABLE, "details": {"confidence": "medium"}},
-            ) as analyze,
+            patch("reactguard.vulnerability_detection.assessors.nextjs.MultiActionAnalyzer") as analyzer_cls,
         ):
+            analyzer_cls.return_value.analyze.return_value = {"status": PocStatus.NOT_VULNERABLE, "details": {"confidence": "medium"}}
             result = assessor.evaluate(
                 base_url="http://localhost",
                 detected_versions={"react_version": "19.0.0"},
@@ -67,11 +66,10 @@ class TestNextJSAssessor(unittest.TestCase):
         self.assertEqual(result["status"], PocStatus.NOT_VULNERABLE)
         self.assertEqual(proto.call_count, 3)
         control.assert_called_once()
-        analyze.assert_called_once()
-        analyze_kwargs = analyze.call_args.kwargs
-        self.assertEqual(analyze_kwargs["action_ids"], fake_actions)
-        self.assertTrue(analyze_kwargs["server_actions_expected"])
-        self.assertEqual(analyze_kwargs["react_major"], 19)
+        analyzer_cls.return_value.analyze.assert_called_once()
+        self.assertEqual(analyzer_cls.return_value.analyze.call_args.kwargs["action_ids"], fake_actions)
+        self.assertTrue(analyzer_cls.call_args.kwargs["server_actions_expected"])
+        self.assertEqual(analyzer_cls.call_args.kwargs["react_major"], 19)
 
     def test_confirmation_round_runs_on_vulnerable(self):
         assessor = NextJSAssessor()
@@ -82,22 +80,20 @@ class TestNextJSAssessor(unittest.TestCase):
         with (
             patch("reactguard.vulnerability_detection.assessors.nextjs.generate_action_ids", side_effect=action_batches),
             patch(
-                "reactguard.vulnerability_detection.assessors.nextjs.run_action_probes",
+                "reactguard.vulnerability_detection.assessors.nextjs.ActionProbeRunner.run",
                 side_effect=[
                     (
                         [{"status_code": 500, "body": "err", "headers": {}, "body_snippet": "err"}] * 3,
                         {"status_code": 500, "body": "err", "headers": {}, "body_snippet": "err"},
-                        set(),
                     ),
                     (
                         [{"status_code": 500, "body": "err2", "headers": {}, "body_snippet": "err2"}] * 2,
                         {"status_code": 500, "body": "err2", "headers": {}, "body_snippet": "err2"},
-                        set(),
                     ),
                 ],
             ) as run_probes,
             patch(
-                "reactguard.vulnerability_detection.assessors.nextjs.analyze_multi_action_results",
+                "reactguard.vulnerability_detection.assessors.nextjs.MultiActionAnalyzer.analyze",
                 side_effect=[
                     {"status": PocStatus.VULNERABLE, "details": {"confidence": "medium", "reason": "first"}, "raw_data": {}},
                     {"status": PocStatus.VULNERABLE, "details": {"confidence": "medium", "reason": "confirm"}, "raw_data": {}},
@@ -132,11 +128,9 @@ class TestGenericRSCAssessor(unittest.TestCase):
                 "reactguard.vulnerability_detection.assessors.generic_rsc.send_control_probe",
                 return_value={"ok": True, "status_code": 200, "headers": {}, "body_snippet": "ok"},
             ) as control,
-            patch(
-                "reactguard.vulnerability_detection.assessors.generic_rsc.analyze_multi_action_results",
-                return_value={"status": PocStatus.INCONCLUSIVE, "details": {}},
-            ) as analyze,
+            patch("reactguard.vulnerability_detection.assessors.generic_rsc.MultiActionAnalyzer") as analyzer_cls,
         ):
+            analyzer_cls.return_value.analyze.return_value = {"status": PocStatus.INCONCLUSIVE, "details": {}}
             result = assessor.evaluate(
                 base_url="http://localhost",
                 detected_versions={"react_version": "19.0.0"},
@@ -146,16 +140,16 @@ class TestGenericRSCAssessor(unittest.TestCase):
         self.assertEqual(result["status"], PocStatus.INCONCLUSIVE)
         self.assertEqual(proto.call_count, 3)
         control.assert_called_once()
-        analyze.assert_called_once()
-        self.assertEqual(analyze.call_args.kwargs["action_ids"], fake_actions)
-        self.assertFalse(analyze.call_args.kwargs["server_actions_expected"])
-        self.assertEqual(analyze.call_args.kwargs["react_major"], 19)
+        analyzer_cls.return_value.analyze.assert_called_once()
+        self.assertEqual(analyzer_cls.return_value.analyze.call_args.kwargs["action_ids"], fake_actions)
+        self.assertFalse(analyzer_cls.call_args.kwargs["server_actions_expected"])
+        self.assertEqual(analyzer_cls.call_args.kwargs["react_major"], 19)
 
 
 class TestReactRouterAssessor(unittest.TestCase):
     def test_skips_when_no_server_actions_surface(self):
         assessor = ReactRouterAssessor()
-        with patch("reactguard.vulnerability_detection.assessors.react_router.run_action_probes") as run_probes:
+        with patch("reactguard.vulnerability_detection.assessors.react_router.ActionProbeRunner.run") as run_probes:
             result = assessor.evaluate(
                 base_url="http://localhost",
                 detected_versions={"react_version": "19.0.0"},

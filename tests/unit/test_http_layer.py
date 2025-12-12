@@ -8,6 +8,7 @@ from reactguard.http.httpx_client import HttpxClient
 from reactguard.http.models import HttpRequest, HttpResponse, RetryConfig
 from reactguard.http.retry import build_default_retry_config, send_with_retries
 from reactguard.http.utils import get_http_client, scan_with_retry, set_shared_http_client
+from reactguard.utils.context import scan_context
 
 
 class SequenceHttpClient:
@@ -135,6 +136,37 @@ def test_shared_http_client_refresh(monkeypatch):
     assert get_http_client() is first
     monkeypatch.setattr("reactguard.http.utils.create_default_http_client", lambda _=None: second)
     assert get_http_client(refresh=True) is second
+
+
+def test_get_http_client_prefers_context_over_global(monkeypatch):
+    import reactguard.http.utils as http_utils
+
+    global_client = SequenceHttpClient([HttpResponse(ok=True)])
+    ctx_client = SequenceHttpClient([HttpResponse(ok=True)])
+    monkeypatch.setattr(http_utils, "_shared_http_client", global_client)
+    with scan_context(http_client=ctx_client):
+        assert get_http_client() is ctx_client
+    assert get_http_client() is global_client
+
+
+def test_scan_with_retry_uses_nested_context_clients(monkeypatch):
+    seen_clients: list[object] = []
+
+    def fake_send_with_retries(client, request, *, retry_config=None):  # noqa: ANN001,ARG001
+        seen_clients.append(client)
+        return HttpResponse(ok=True, status_code=200, headers={}, text="", url=request.url)
+
+    monkeypatch.setattr("reactguard.http.utils.send_with_retries", fake_send_with_retries)
+
+    client_a = object()
+    client_b = object()
+    with scan_context(http_client=client_a):
+        scan_with_retry("http://example/a")
+        with scan_context(http_client=client_b):
+            scan_with_retry("http://example/b")
+        scan_with_retry("http://example/c")
+
+    assert seen_clients == [client_a, client_b, client_a]
 
 
 def test_httpx_client_success_and_error(monkeypatch):
