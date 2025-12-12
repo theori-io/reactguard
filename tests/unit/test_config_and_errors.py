@@ -50,6 +50,19 @@ def test_http_settings_invalid_env_fall_back(monkeypatch):
     assert DEFAULT_USER_AGENT in settings.user_agent
 
 
+def test_http_settings_redirects_truthy_variants(monkeypatch):
+    importlib.reload(config)
+    monkeypatch.setenv("REACTGUARD_HTTP_REDIRECTS", "1")
+    importlib.reload(config)
+    settings = config.load_http_settings()
+    assert settings.allow_redirects is True
+
+    monkeypatch.setenv("REACTGUARD_HTTP_REDIRECTS", "on")
+    importlib.reload(config)
+    settings = config.load_http_settings()
+    assert settings.allow_redirects is True
+
+
 def test_categorize_exception_mappings():
     assert categorize_exception(httpx.TimeoutException("t")) is ErrorCategory.TIMEOUT
     assert categorize_exception(httpx.ConnectError("c", request=None)) is ErrorCategory.CONNECTION_ERROR

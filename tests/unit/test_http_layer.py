@@ -70,6 +70,26 @@ def test_send_with_retries_non_retriable_stops(monkeypatch):
     assert client.calls == 1
 
 
+def test_send_with_retries_converts_exceptions(monkeypatch):
+    monkeypatch.setattr(time, "sleep", lambda _: None)
+
+    class ExceptionThenSuccess:
+        def __init__(self):
+            self.calls = 0
+
+        def request(self, request: HttpRequest) -> HttpResponse:  # noqa: ARG002
+            self.calls += 1
+            if self.calls == 1:
+                raise RuntimeError("boom")
+            return HttpResponse(ok=True, status_code=200, text="ok")
+
+    client = ExceptionThenSuccess()
+    result = send_with_retries(client, HttpRequest(url="http://example"))
+    assert result.ok is True
+    assert result.meta["retry_count"] == 1
+    assert client.calls == 2
+
+
 def test_send_with_retries_returns_last_response(monkeypatch):
     monkeypatch.setattr(time, "sleep", lambda _: None)
     resp = HttpResponse(ok=False, error_category=ErrorCategory.TIMEOUT.value, error_message="timeout")

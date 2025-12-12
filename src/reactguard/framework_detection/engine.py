@@ -68,7 +68,7 @@ class FrameworkDetectionEngine:
         http_request = HttpRequest(
             url=request.url,
             method="GET",
-            headers=request.headers,
+            headers=request.request_headers,
             allow_redirects=True,
             proxy=request.proxy_profile,
             correlation_id=request.correlation_id,
@@ -95,8 +95,13 @@ class FrameworkDetectionEngine:
 
     @staticmethod
     def _normalize_headers(request: ScanRequest, response) -> dict[str, str]:
-        raw_headers = request.headers or (response.headers if response else {})
-        return {k.lower(): v for k, v in (raw_headers or {}).items()}
+        raw_headers: dict[str, str] = {}
+        if request.response_headers:
+            raw_headers.update(request.response_headers)
+        if response and response.headers:
+            # Response headers should take precedence over any offline overrides.
+            raw_headers.update(response.headers)
+        return {k.lower(): v for k, v in raw_headers.items()}
 
     @staticmethod
     def _resolve_body(request: ScanRequest, response) -> str:

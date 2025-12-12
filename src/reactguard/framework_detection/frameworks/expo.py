@@ -103,8 +103,5 @@ class ExpoDetector(FrameworkDetector):
             if rsc_result["server_actions_enabled"]:
                 signals["expo_server_actions_experimental"] = True
 
-        if is_expo and not context.url:
-            signals.setdefault("server_actions_enabled", False)
-
     def should_skip(self, tags: TagSet) -> bool:
         return "expo" in tags

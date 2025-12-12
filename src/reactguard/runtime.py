@@ -54,14 +54,19 @@ class ReactGuard:
         *,
         proxy_profile: str | None = None,
         correlation_id: str | None = None,
+        request_headers: dict[str, str] | None = None,
+        response_headers: dict[str, str] | None = None,
         headers: dict[str, str] | None = None,
         body: str | None = None,
     ) -> FrameworkDetectionResult:
+        if request_headers is None and headers is not None:
+            request_headers = headers
         request = ScanRequest(
             url=url,
             proxy_profile=proxy_profile,
             correlation_id=correlation_id,
-            headers=headers,
+            request_headers=request_headers,
+            response_headers=response_headers,
             body=body,
         )
         return self.detection_engine.detect(request)

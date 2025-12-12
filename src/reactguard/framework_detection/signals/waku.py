@@ -22,6 +22,7 @@ import re
 from urllib.parse import urljoin
 
 from ...config import load_http_settings
+from ...errors import categorize_exception
 from ...http import scan_with_retry
 from ...http.client import HttpClient
 from ..constants import (
@@ -114,7 +115,7 @@ def probe_waku_server_actions(
     proxy_profile: str | None = None,
     correlation_id: str | None = None,
     http_client: HttpClient | None = None,
-) -> tuple[bool, int] | tuple[bool, int, list[tuple[str, str]]]:
+) -> tuple[bool, int] | tuple[bool, int, list[tuple[str, str]]] | tuple[bool, int, list[tuple[str, str]], dict[str, str | int | None]]:
     if not base_url:
         return False, 0
 
@@ -130,7 +131,16 @@ def probe_waku_server_actions(
             http_client=http_client,
         )
         if not scan.get("ok"):
-            return False, 0
+            return (
+                False,
+                0,
+                [],
+                {
+                    "error_category": scan.get("error_category"),
+                    "error_message": scan.get("error_message"),
+                    "status_code": scan.get("status_code"),
+                },
+            )
 
         body = scan.get("body") or scan.get("body_snippet", "")
 
@@ -215,5 +225,11 @@ def probe_waku_server_actions(
         count = len(endpoints)
         return (has_actions, count, endpoints)
 
-    except Exception:
-        return False, 0
+    except Exception as exc:  # noqa: BLE001
+        category = categorize_exception(exc).value
+        return (
+            False,
+            0,
+            [],
+            {"error_category": category, "error_message": str(exc), "error_type": exc.__class__.__name__},
+        )
