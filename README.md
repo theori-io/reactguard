@@ -10,7 +10,7 @@ ReactGuard provides framework- and vulnerability-detection tooling for CVE-2025-
 
 ### Install
 ```
-pip install -e .
+pip install git+https://github.com/theori-io/reactguard.git
 ```
 
 ### CLI
