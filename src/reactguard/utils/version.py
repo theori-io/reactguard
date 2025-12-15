@@ -93,7 +93,7 @@ def _confidence_label(score: int) -> str:
 def parse_semver(version: str | None) -> ParsedVersion | None:
     if not version:
         return None
-    match = re.match(r"(\d+)\.(\d+)(?:\.(\d+))?(?:-([0-9A-Za-z.-]+))?", str(version))
+    match = re.fullmatch(r"(\d+)\.(\d+)(?:\.(\d+))?(?:-([0-9A-Za-z.-]+))?", str(version))
     if not match:
         return None
     return ParsedVersion(

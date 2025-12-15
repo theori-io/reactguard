@@ -30,6 +30,7 @@ def test_action_id_helpers():
 def test_semver_utils_and_version_flags():
     parsed = version.parse_semver("15.2.1-canary.5")
     assert parsed and parsed.to_tuple() == (15, 2, 1, "canary.5")
+    assert version.parse_semver("1.2.3junk") is None
     assert version.compare_semver("1.2.3", "2.0.0") == -1
     assert version.compare_semver("2.0.0", "2.0.0") == 0
     assert version.compare_semver("bad", "2.0.0") is None

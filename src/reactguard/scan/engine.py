@@ -16,33 +16,36 @@ You should have received a copy of the GNU Affero General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
-"""Run a full scan: framework detection followed by vulnerability detection."""
+"""Scan engine: framework detection followed by vulnerability detection."""
 
 
 from ..framework_detection.engine import FrameworkDetectionEngine
+from ..framework_detection.keys import SIG_FINAL_URL
 from ..models import FrameworkDetectionResult, ScanReport, ScanRequest
-from ..vulnerability_detection.runner import VulnerabilityDetectionRunner
-from .report import build_scan_report
+from ..vulnerability_detection.engine import VulnerabilityDetectionEngine
+from .report_builder import build_scan_report
 
 
-class ScanRunner:
+class ScanEngine:
     """Coordinates framework detection and vulnerability detection for a single target."""
 
     def __init__(
         self,
         detection_engine: FrameworkDetectionEngine | None = None,
-        vulnerability_runner: VulnerabilityDetectionRunner | None = None,
+        vulnerability_engine: VulnerabilityDetectionEngine | None = None,
     ):
         self.detection_engine = detection_engine or FrameworkDetectionEngine()
-        self.vulnerability_runner = vulnerability_runner or VulnerabilityDetectionRunner(self.detection_engine)
+        self.vulnerability_engine = vulnerability_engine or VulnerabilityDetectionEngine(self.detection_engine)
 
     def run(self, request: ScanRequest) -> ScanReport:
         detection_result: FrameworkDetectionResult = self.detection_engine.detect(request)
-        target_url = str(detection_result.signals.get("final_url") or request.url or "")
+        target_url = str(detection_result.signals.get(SIG_FINAL_URL) or request.url or "")
 
-        vulnerability_result = self.vulnerability_runner.run(
+        vulnerability_result = self.vulnerability_engine.run(
             target_url,
             detection_result=detection_result,
+            proxy_profile=request.proxy_profile,
+            correlation_id=request.correlation_id,
         )
 
         return build_scan_report(detection_result, vulnerability_result)

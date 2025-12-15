@@ -21,8 +21,9 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 import re
 from urllib.parse import urljoin, urlparse
 
-from ...http import scan_with_retry
+from ...http import request_with_retries
 from ...http.client import HttpClient
+from ...http.url import build_base_dir_url, build_endpoint_candidates, same_origin
 from ...utils.context import scan_context
 
 
@@ -30,21 +31,11 @@ def extract_js_urls(body: str, base_url: str) -> list[str]:
     js_urls = set()
 
     for match in re.findall(
-        r'<script[^>]+src=["\']([^"\']+\.(?:js|mjs|cjs)(?:\?[^"\']*)?)["\']',
+        r'<script[^>]+src=["\']([^"\']+\.(?:js|mjs|cjs|jsx|tsx)(?:\?[^"\']*)?)["\']',
         body,
         re.IGNORECASE,
     ):
         js_urls.add(match)
-
-    for match in re.findall(
-        r'<script[^>]+src=["\']([^"\']+\.(jsx|tsx))["\']',
-        body,
-        re.IGNORECASE,
-    ):
-        if isinstance(match, tuple):
-            js_urls.add(match[0])
-        else:
-            js_urls.add(match)
 
     for match in re.findall(
         r'<link[^>]+href=["\']([^"\']+\.(?:js|mjs|cjs)(?:\?[^"\']*)?)["\']',
@@ -57,17 +48,35 @@ def extract_js_urls(body: str, base_url: str) -> list[str]:
         if "/" in match:
             js_urls.add(match)
 
-    normalized = set()
+    normalized: set[str] = set()
     base_scheme = urlparse(base_url).scheme or "http"
+    base_dir = build_base_dir_url(base_url)
+
     for js_url in js_urls:
-        if js_url.startswith("http://") or js_url.startswith("https://"):
-            normalized.add(js_url)
-        elif js_url.startswith("//"):
-            normalized.add(f"{base_scheme}:{js_url}")
-        elif js_url.startswith("/"):
-            normalized.add(urljoin(base_url, js_url))
-        else:
-            normalized.add(urljoin(base_url, js_url))
+        if js_url.startswith(("http://", "https://")):
+            if same_origin(base_url, js_url):
+                normalized.add(js_url)
+            continue
+
+        if js_url.startswith("//"):
+            absolute = f"{base_scheme}:{js_url}"
+            if same_origin(base_url, absolute):
+                normalized.add(absolute)
+            continue
+
+        if js_url.startswith("/"):
+            for candidate in build_endpoint_candidates(base_url, js_url):
+                if same_origin(base_url, candidate):
+                    normalized.add(candidate)
+            continue
+
+        # Page-relative: resolve both as file-relative and dir-relative to handle `/app` vs `/app/`.
+        primary = urljoin(base_url, js_url)
+        if same_origin(base_url, primary):
+            normalized.add(primary)
+        secondary = urljoin(base_dir, js_url)
+        if same_origin(base_url, secondary):
+            normalized.add(secondary)
 
     def priority_score(url: str) -> int:
         url_lower = url.lower()
@@ -81,7 +90,7 @@ def extract_js_urls(body: str, base_url: str) -> list[str]:
             return 3
         return 4
 
-    sorted_urls = sorted(normalized, key=priority_score)
+    sorted_urls = sorted(normalized, key=lambda url: (priority_score(url), url))
     return sorted_urls[:20]
 
 
@@ -91,7 +100,7 @@ def _probe_js_bundles_ctx(url: str, body: str) -> dict[str, bool]:
     all_js_urls = extract_js_urls(body, url)
 
     for script_src in all_js_urls:
-        scan = scan_with_retry(
+        scan = request_with_retries(
             script_src,
             allow_redirects=True,
         )
@@ -127,8 +136,13 @@ def _probe_js_bundles_ctx(url: str, body: str) -> dict[str, bool]:
         if has_expo_router:
             signals["expo_router"] = True
 
-        has_react_dom = "react-dom" in js_content.lower()
-        has_rsc_runtime = "react-server-dom" in js_content.lower()
+        js_lower = js_content.lower()
+        has_react_dom = "react-dom" in js_lower
+        has_rsc_runtime = "react-server-dom" in js_lower
+        if has_react_dom:
+            signals["react_dom_bundle"] = True
+        if has_rsc_runtime:
+            signals["react_server_dom_bundle"] = True
         if has_react_dom or has_rsc_runtime:
             signals["react_bundle"] = True
 
@@ -147,16 +161,9 @@ def probe_js_bundles(
     body: str,
     *,
     timeout: float | None = None,
-    proxy_profile: str | None = None,
-    correlation_id: str | None = None,
     http_client: HttpClient | None = None,
 ) -> dict[str, bool]:
-    if timeout is not None or proxy_profile is not None or correlation_id is not None or http_client is not None:
-        with scan_context(
-            timeout=timeout,
-            proxy_profile=proxy_profile,
-            correlation_id=correlation_id,
-            http_client=http_client,
-        ):
+    if timeout is not None or http_client is not None:
+        with scan_context(timeout=timeout, http_client=http_client):
             return _probe_js_bundles_ctx(url, body)
     return _probe_js_bundles_ctx(url, body)

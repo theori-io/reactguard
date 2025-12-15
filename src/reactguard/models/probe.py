@@ -21,7 +21,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 from dataclasses import dataclass, field
 from typing import Any
 
-from .http import HttpResponse
+from ..http.models import HttpResponse
 
 
 @dataclass
@@ -38,6 +38,6 @@ class ProbeRequest:
 class ProbeResult:
     ok: bool
     response: HttpResponse | None = None
-    error_category: str | None = None
     error_message: str | None = None
+    error_type: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)

@@ -1,7 +1,9 @@
-from reactguard.cli.main import _pretty_print, build_parser
+from reactguard.cli.main import _cve_sort_key, _pretty_print, build_parser
 from reactguard.models import FrameworkDetectionResult, ScanReport, VulnerabilityReport
 from reactguard.models.poc import PocStatus
 from reactguard.runtime import ReactGuard
+from reactguard.vulnerability_detection.engine import VulnerabilityDetectionEngine
+from reactguard.vulnerability_detection.registry import CVE202555182VulnerabilityDetector
 
 
 def test_build_parser_and_pretty_print(capsys):
@@ -49,7 +51,7 @@ class DummyDetectionEngine:
         return self.result
 
 
-class DummyVulnRunner:
+class DummyVulnEngine:
     def __init__(self, result):
         self.result = result
         self.calls = 0
@@ -59,7 +61,7 @@ class DummyVulnRunner:
         return self.result
 
 
-class DummyScanRunner:
+class DummyScanEngine:
     def __init__(self, result):
         self.result = result
         self.calls = 0
@@ -81,14 +83,15 @@ def test_reactguard_facade_methods():
 
     guard = ReactGuard(http_client=client)
     guard.detection_engine = DummyDetectionEngine(detection_result)
-    guard.vulnerability_runner = DummyVulnRunner(vuln_dict)
-    guard.scan_runner = DummyScanRunner(scan_report)
+    guard.vulnerability_engine = DummyVulnEngine(vuln_dict)
+    guard.scan_engine = DummyScanEngine(scan_report)
 
-    detect_out = guard.detect("http://example.com")
+    detect_out = guard.detect("http://example.com", proxy_profile="legacy-proxy", correlation_id="legacy-correlation")
     assert detect_out.tags == ["nextjs"]
-    vuln_out = guard.vuln("http://example.com")
-    assert isinstance(vuln_out, VulnerabilityReport)
-    scan_out = guard.scan("http://example.com")
+    vuln_out = guard.scan_vulnerabilities("http://example.com", proxy_profile="legacy-proxy", correlation_id="legacy-correlation")
+    assert isinstance(vuln_out, list)
+    assert isinstance(vuln_out[0], VulnerabilityReport)
+    scan_out = guard.scan("http://example.com", proxy_profile="legacy-proxy", correlation_id="legacy-correlation")
     assert isinstance(scan_out, ScanReport)
     guard.close()
     assert client.closed is True
@@ -132,3 +135,40 @@ def test_cli_main_executes(monkeypatch, capsys):
     assert exit_code == 0
     output = capsys.readouterr().out
     assert "status" in output.lower()
+
+
+def test_cli_json_truncates_large_strings(capsys):
+    from reactguard.cli.main import _print_json
+
+    _print_json({"body": "x" * 5000})
+    output = capsys.readouterr().out
+    assert "[truncated]" in output
+
+
+def test_cve_sort_key_parses_ids():
+    assert _cve_sort_key("CVE-2025-55182") == (2025, 55182, "CVE-2025-55182")
+    assert _cve_sort_key("not-a-cve")[0] == 9999
+
+
+def test_ignored_proxy_and_correlation_are_accepted():
+    detection_result = FrameworkDetectionResult(tags=[], signals={"fetch_error_message": "TIMEOUT"})
+
+    detector = CVE202555182VulnerabilityDetector()
+    result = detector.evaluate(
+        "http://example.com",
+        detection_result=detection_result,
+        proxy_profile="legacy-proxy",
+        correlation_id="legacy-correlation",
+    )
+    assert result.status == PocStatus.INCONCLUSIVE
+
+    engine = VulnerabilityDetectionEngine()
+    out = engine.run(
+        "http://example.com",
+        detection_result=detection_result,
+        proxy_profile="legacy-proxy",
+        correlation_id="legacy-correlation",
+    )
+    assert isinstance(out, list)
+    assert all(isinstance(item, VulnerabilityReport) for item in out)
+    assert any(item.status == PocStatus.INCONCLUSIVE for item in out)

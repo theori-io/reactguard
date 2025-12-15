@@ -23,8 +23,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 import httpx
 
-from ..config import HttpSettings
-from ..errors import categorize_exception
+from ..config import HttpSettings, load_http_settings
 from .client import HttpClient
 from .models import HttpRequest, HttpResponse
 
@@ -33,7 +32,7 @@ class HttpxClient(HttpClient):
     """Synchronous httpx client wrapper."""
 
     def __init__(self, settings: HttpSettings | None = None, client: httpx.Client | None = None):
-        self.settings = settings or HttpSettings()
+        self.settings = settings or load_http_settings()
         self._client = client or httpx.Client(
             follow_redirects=self.settings.allow_redirects,
             timeout=self.settings.timeout,
@@ -45,27 +44,55 @@ class HttpxClient(HttpClient):
         headers.setdefault("User-Agent", self.settings.user_agent)
 
         try:
-            resp = self._client.request(
+            max_body_bytes = self.settings.max_body_bytes
+            if max_body_bytes <= 0:
+                max_body_bytes = 16 * 1024 * 1024
+
+            with self._client.stream(
                 request.method,
                 request.url,
                 headers=headers,
                 content=request.body,
                 timeout=request.timeout or self.settings.timeout,
                 follow_redirects=request.allow_redirects,
-            )
+            ) as resp:
+                content = bytearray()
+                truncated = False
+                for chunk in resp.iter_bytes():
+                    if not chunk:
+                        continue
+                    remaining = max_body_bytes - len(content)
+                    if remaining <= 0:
+                        truncated = True
+                        break
+                    if len(chunk) > remaining:
+                        content.extend(chunk[:remaining])
+                        truncated = True
+                        break
+                    content.extend(chunk)
+
+                encoding = resp.encoding or "utf-8"
+                try:
+                    text = bytes(content).decode(encoding, errors="replace")
+                except LookupError:
+                    text = bytes(content).decode("utf-8", errors="replace")
+
             return HttpResponse(
                 ok=True,
                 status_code=resp.status_code,
                 headers=dict(resp.headers),
-                text=resp.text,
-                content=resp.content,
+                text=text,
+                content=bytes(content),
                 url=str(resp.url),
+                meta={
+                    "body_truncated": truncated,
+                    "body_bytes_read": len(content),
+                    "body_bytes_limit": max_body_bytes,
+                },
             )
         except Exception as exc:  # noqa: BLE001
-            category = categorize_exception(exc)
             return HttpResponse(
                 ok=False,
-                error_category=category.value,
                 error_message=str(exc),
                 error_type=type(exc).__name__,
             )

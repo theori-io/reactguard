@@ -29,8 +29,6 @@ from ..utils import TagSet
 @dataclass
 class DetectionContext:
     url: str | None
-    proxy_profile: str | None
-    correlation_id: str | None
     http_client: HttpClient
 
 

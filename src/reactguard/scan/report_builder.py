@@ -20,13 +20,22 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 """Reporting helpers for scan orchestration."""
 
+from typing import Any
+
 from ..models import FrameworkDetectionResult, ScanReport, VulnerabilityReport
 
 
 def build_scan_report(
     detection_result: FrameworkDetectionResult,
-    vulnerability_result,
+    vulnerability_result: VulnerabilityReport | dict[str, Any] | list[VulnerabilityReport] | list[dict[str, Any]],
 ) -> ScanReport:
     """Combine detection + vulnerability results into a single report."""
+    if isinstance(vulnerability_result, list):
+        vuln_reports = [v if isinstance(v, VulnerabilityReport) else VulnerabilityReport.from_mapping(v) for v in vulnerability_result]
+        return ScanReport.from_parts(detection_result, vuln_reports)
+
     vuln_report = vulnerability_result if isinstance(vulnerability_result, VulnerabilityReport) else VulnerabilityReport.from_mapping(vulnerability_result)
     return ScanReport.from_parts(detection_result, vuln_report)
+
+
+__all__ = ["build_scan_report"]

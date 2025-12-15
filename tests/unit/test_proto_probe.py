@@ -2,7 +2,7 @@
 import unittest
 from unittest.mock import patch
 
-from reactguard.vulnerability_detection.payloads import proto_probe, run_action_probes
+from reactguard.vulnerability_detection.probes import proto_probe, run_action_probes
 
 
 class TestProtoProbe(unittest.TestCase):
@@ -19,8 +19,8 @@ class TestProtoProbe(unittest.TestCase):
             }
 
         with (
-            patch("reactguard.vulnerability_detection.payloads.proto_probe.secrets.token_hex", return_value="feedface"),
-            patch("reactguard.vulnerability_detection.payloads.proto_probe.scan_with_retry", side_effect=fake_scan),
+            patch("reactguard.vulnerability_detection.probes.proto_probe.secrets.token_hex", return_value="feedface"),
+            patch("reactguard.vulnerability_detection.probes.proto_probe.request_with_retries", side_effect=fake_scan),
         ):
             result = proto_probe.send_proto_probe("http://localhost")
 
@@ -45,8 +45,8 @@ class TestProtoProbe(unittest.TestCase):
             }
 
         with (
-            patch("reactguard.vulnerability_detection.payloads.proto_probe.secrets.token_hex", return_value="a1b2c3d4"),
-            patch("reactguard.vulnerability_detection.payloads.proto_probe.scan_with_retry", side_effect=fake_scan),
+            patch("reactguard.vulnerability_detection.probes.proto_probe.secrets.token_hex", return_value="a1b2c3d4"),
+            patch("reactguard.vulnerability_detection.probes.proto_probe.request_with_retries", side_effect=fake_scan),
         ):
             result = proto_probe.send_control_probe("http://localhost")
 
@@ -58,7 +58,7 @@ class TestProtoProbe(unittest.TestCase):
 
     def test_run_action_probes_adds_ids_and_errors(self):
         def fake_probe(url, action_id=None, **kwargs):
-            return {"ok": False, "error_category": "TIMEOUT", "headers": {}, "body_snippet": ""}
+            return {"ok": False, "error_message": "TIMEOUT", "error_type": "Timeout", "headers": {}, "body_snippet": ""}
 
         def fake_control(url, action_id=None, **kwargs):
             return {"ok": True, "status_code": 200}
@@ -73,7 +73,7 @@ class TestProtoProbe(unittest.TestCase):
 
         self.assertEqual([r["action_id"] for r in probe_results], actions)
         self.assertEqual(control_result.get("action_id"), "control_probe")
-        self.assertEqual(probe_results[0].get("error_category"), "TIMEOUT")
+        self.assertEqual(probe_results[0].get("error_message"), "TIMEOUT")
 
 
 if __name__ == "__main__":

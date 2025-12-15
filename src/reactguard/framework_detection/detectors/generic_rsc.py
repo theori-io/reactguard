@@ -23,11 +23,12 @@ from typing import Any
 from ...utils import TagSet
 from ..base import DetectionContext, FrameworkDetector
 from ..constants import GENERIC_FLIGHT_PAYLOAD_PATTERN, GENERIC_FRAGMENT_PATTERN
+from ..keys import SIG_RSC_CONTENT_TYPE, SIG_RSC_FLIGHT_PAYLOAD, TAG_REACT_STREAMING, TAG_RSC
 
 
 class GenericRSCDetector(FrameworkDetector):
     name = "generic_rsc"
-    produces_tags = ["rsc", "react-streaming"]
+    produces_tags = [TAG_RSC, TAG_REACT_STREAMING]
     priority = 90
 
     def detect(
@@ -40,13 +41,13 @@ class GenericRSCDetector(FrameworkDetector):
     ) -> None:
         content_type = headers.get("content-type", "")
         if "text/x-component" in content_type:
-            tags.add("rsc")
-            signals["rsc_content_type"] = True
+            tags.add(TAG_RSC)
+            signals[SIG_RSC_CONTENT_TYPE] = True
 
         if GENERIC_FLIGHT_PAYLOAD_PATTERN.search(body):
-            tags.add("rsc")
-            signals["rsc_flight_payload"] = True
+            tags.add(TAG_RSC)
+            signals[SIG_RSC_FLIGHT_PAYLOAD] = True
 
         if GENERIC_FRAGMENT_PATTERN.search(body) or "<!--$-->" in body:
-            tags.add("react-streaming")
+            tags.add(TAG_REACT_STREAMING)
             signals["react_streaming_markers"] = True

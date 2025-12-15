@@ -19,8 +19,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """Waku framework detector."""
 
 from typing import Any
-from urllib.parse import urljoin
 
+from ...http.url import build_endpoint_candidates
 from ...utils import TagSet
 from ..base import DetectionContext, FrameworkDetector
 from ..constants import (
@@ -31,6 +31,7 @@ from ..constants import (
     WAKU_VARS_PATTERN,
     WAKU_WEBPACK_CHUNK_PATTERN,
 )
+from ..keys import SIG_RSC_ENDPOINT_FOUND, SIG_SERVER_ACTION_ENDPOINTS, SIG_SERVER_ACTIONS_ENABLED, TAG_RSC, TAG_WAKU
 from ..signals.waku import (
     probe_waku_minimal_html,
     probe_waku_rsc_surface,
@@ -40,7 +41,7 @@ from ..signals.waku import (
 
 class WakuDetector(FrameworkDetector):
     name = "waku"
-    produces_tags = ["waku", "rsc"]
+    produces_tags = [TAG_WAKU, TAG_RSC]
     priority = 15
 
     def detect(
@@ -87,19 +88,12 @@ class WakuDetector(FrameworkDetector):
             if "detected_waku_version" not in signals:
                 signals["waku_version_range"] = "0.17-0.20"
 
-        if context.url and probe_waku_minimal_html(
-            body,
-            context.url,
-        ):
+        if context.url and probe_waku_minimal_html(body, context.url):
             is_waku = True
             signals["waku_minimal_html"] = True
-            has_rsc_surface = True
 
-        if context.url and not has_rsc_surface:
-            if probe_waku_rsc_surface(
-                context.url,
-            ):
-                is_waku = True
+        if is_waku and context.url and not has_rsc_surface:
+            if probe_waku_rsc_surface(context.url):
                 signals["waku_rsc_surface"] = True
                 has_rsc_surface = True
 
@@ -111,22 +105,28 @@ class WakuDetector(FrameworkDetector):
                 has_actions = bool(action_probe[0])
                 action_count = action_probe[1] if len(action_probe) > 1 else 0
                 if len(action_probe) >= 3 and isinstance(action_probe[2], list):
-                    endpoints_list = [urljoin(context.url, ep[0]) if context.url else ep[0] for ep in action_probe[2]]
+                    endpoints_list = []
+                    for endpoint_path, _action_name in action_probe[2]:
+                        if not context.url:
+                            continue
+                        for candidate in build_endpoint_candidates(context.url, endpoint_path):
+                            if candidate not in endpoints_list:
+                                endpoints_list.append(candidate)
             else:
                 has_actions = bool(action_probe)
                 action_count = 0
 
             if has_actions:
-                signals["server_actions_enabled"] = True
+                signals[SIG_SERVER_ACTIONS_ENABLED] = True
                 signals["waku_action_endpoints"] = action_count
                 has_rsc_surface = True
                 if endpoints_list:
-                    signals["server_action_endpoints"] = endpoints_list
+                    signals[SIG_SERVER_ACTION_ENDPOINTS] = endpoints_list
 
         if is_waku:
-            tags.add("waku")
-            tags.add("rsc")
-            signals["rsc_endpoint_found"] = bool(has_rsc_surface)
+            tags.add(TAG_WAKU)
+            tags.add(TAG_RSC)
+            signals[SIG_RSC_ENDPOINT_FOUND] = bool(has_rsc_surface)
 
     def should_skip(self, tags: TagSet) -> bool:
-        return "waku" in tags
+        return TAG_WAKU in tags

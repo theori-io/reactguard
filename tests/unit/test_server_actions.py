@@ -5,7 +5,7 @@ from reactguard.utils.tag_manager import TagSet
 def test_detect_server_actions_handles_404(monkeypatch):
     monkeypatch.setattr(
         server_actions,
-        "scan_with_retry",
+        "request_with_retries",
         lambda *_, **__: {"ok": True, "status_code": 404, "headers": {}, "body": "not found", "body_snippet": "not found"},
     )
     result = server_actions.detect_server_actions("http://example")
@@ -17,7 +17,7 @@ def test_detect_server_actions_handles_404(monkeypatch):
 def test_detect_server_actions_html_and_rsc_paths(monkeypatch):
     monkeypatch.setattr(
         server_actions,
-        "scan_with_retry",
+        "request_with_retries",
         lambda *_, **__: {
             "ok": True,
             "status_code": 200,
@@ -32,7 +32,7 @@ def test_detect_server_actions_html_and_rsc_paths(monkeypatch):
 
     monkeypatch.setattr(
         server_actions,
-        "scan_with_retry",
+        "request_with_retries",
         lambda *_, **__: {
             "ok": True,
             "status_code": 500,
@@ -49,7 +49,7 @@ def test_detect_server_actions_html_and_rsc_paths(monkeypatch):
 def test_detect_server_actions_redirect(monkeypatch):
     monkeypatch.setattr(
         server_actions,
-        "scan_with_retry",
+        "request_with_retries",
         lambda *_, **__: {"ok": True, "status_code": 302, "headers": {}, "body": "", "body_snippet": ""},
     )
     result = server_actions.detect_server_actions("http://example")

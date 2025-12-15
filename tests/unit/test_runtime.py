@@ -25,7 +25,7 @@ class TestReactGuardRuntime(unittest.TestCase):
         with (
             ReactGuard(http_client=client) as guard,
             patch(
-                "reactguard.vulnerability_detection.runner.VulnerabilityDetectionRunner.run",
+                "reactguard.vulnerability_detection.engine.VulnerabilityDetectionEngine.run",
                 return_value={"status": "INCONCLUSIVE", "details": {}},
             ) as vuln_run,
         ):

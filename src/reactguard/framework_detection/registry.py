@@ -18,7 +18,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 """Framework fingerprinter registry."""
 
-from .frameworks import (
+from .detectors import (
     ExpoDetector,
     GenericRSCDetector,
     NextJSDetector,

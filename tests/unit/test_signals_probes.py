@@ -12,7 +12,7 @@ def test_extract_js_urls_normalizes_and_prioritizes():
     urls = bundle.extract_js_urls(body, base_url)
     assert urls[0].startswith("http://example/_next/static")
     assert any(u.startswith("http://example/app/main.js") for u in urls)
-    assert any(u.startswith("http://cdn.example.com") for u in urls)
+    assert not any(u.startswith("http://cdn.example.com") for u in urls)
 
 
 def test_probe_js_bundles_detects_router(monkeypatch):
@@ -22,7 +22,7 @@ def test_probe_js_bundles_detects_router(monkeypatch):
         calls.append(url)
         return {"ok": True, "status_code": 200, "body": '__reactRouterManifest "react-router@7.0.0"', "headers": {}}
 
-    monkeypatch.setattr(bundle, "scan_with_retry", fake_scan)
+    monkeypatch.setattr(bundle, "request_with_retries", fake_scan)
     signals = bundle.probe_js_bundles("http://example", '<script src="/_next/static/chunk.js"></script>')
     assert signals["react_router_v7_bundle"] is True
     assert calls
@@ -31,7 +31,7 @@ def test_probe_js_bundles_detects_router(monkeypatch):
 def test_probe_rsc_endpoint_and_actions(monkeypatch):
     monkeypatch.setattr(
         rsc,
-        "scan_with_retry",
+        "request_with_retries",
         lambda *_, **__: {"ok": True, "status_code": 200, "headers": {"content-type": "text/x-component"}, "body": "0:[", "body_snippet": "0:["},
     )
     assert rsc.probe_rsc_endpoint("http://example") is True
@@ -69,7 +69,7 @@ def test_apply_rsc_probe_results_promotes_signals(monkeypatch):
 def test_probe_server_actions_support_reads_rsc(monkeypatch):
     monkeypatch.setattr(
         server_actions,
-        "scan_with_retry",
+        "request_with_retries",
         lambda *_, **__: {
             "ok": True,
             "status_code": 200,
@@ -124,20 +124,60 @@ def test_apply_server_actions_probe_results_sets_tags():
 
 
 def test_probe_waku_rsc_surface_and_minimal_html(monkeypatch):
+    def fake_scan(url, **kwargs):  # noqa: ARG001
+        if url.endswith("/RSC/_"):
+            return {"ok": True, "status_code": 200, "headers": {"content-type": "text/x-component"}, "body": "0:[", "body_snippet": "0:["}
+        if url.endswith("/assets/index.js"):
+            return {"ok": True, "status_code": 200, "headers": {"content-type": "application/javascript"}, "body": "globalThis.__WAKU_HYDRATE__=true;", "body_snippet": ""}
+        return {"ok": False, "status_code": 404, "headers": {}, "body": "", "body_snippet": ""}
+
+    monkeypatch.setattr(waku, "request_with_retries", fake_scan)
+    assert waku.probe_waku_rsc_surface("http://example")
+    minimal_body = '<html><body><script>import("/assets/index.js")</script></body></html>'
+    assert waku.probe_waku_minimal_html(minimal_body, "http://example")
+
+
+def test_probe_waku_rsc_surface_rejects_plaintext_404(monkeypatch):
     monkeypatch.setattr(
         waku,
-        "scan_with_retry",
+        "request_with_retries",
+        lambda url, **kwargs: {  # noqa: ARG001
+            "ok": True,
+            "status_code": 404,
+            "headers": {"content-type": "text/plain"},
+            "body": "Not Found",
+            "body_snippet": "Not Found",
+        },
+    )
+    assert waku.probe_waku_rsc_surface("http://example") is False
+
+
+def test_probe_waku_rsc_surface_requires_flight_for_text_plain(monkeypatch):
+    monkeypatch.setattr(
+        waku,
+        "request_with_retries",
         lambda url, **kwargs: {  # noqa: ARG001
             "ok": True,
             "status_code": 200,
-            "headers": {"content-type": "text/x-component"},
-            "body": "0:[",
+            "headers": {"content-type": "text/plain"},
+            "body": "Not Found",
+            "body_snippet": "Not Found",
+        },
+    )
+    assert waku.probe_waku_rsc_surface("http://example") is False
+
+    monkeypatch.setattr(
+        waku,
+        "request_with_retries",
+        lambda url, **kwargs: {  # noqa: ARG001
+            "ok": True,
+            "status_code": 200,
+            "headers": {"content-type": "text/plain"},
+            "body": '0:[null,["$","$L1",null,{"foo":"bar"}]]',
             "body_snippet": "0:[",
         },
     )
-    assert waku.probe_waku_rsc_surface("http://example")
-    minimal_body = '<html><body><script>import("x")</script></body></html>'
-    assert waku.probe_waku_minimal_html(minimal_body, "http://example")
+    assert waku.probe_waku_rsc_surface("http://example") is True
 
 
 def test_probe_waku_server_actions_extracts_endpoints(monkeypatch):
@@ -158,7 +198,7 @@ def test_probe_waku_server_actions_extracts_endpoints(monkeypatch):
             "body_snippet": "/RSC/F/123456789abc/actionTwo.txt",
         }
 
-    monkeypatch.setattr(waku, "scan_with_retry", fake_scan)
+    monkeypatch.setattr(waku, "request_with_retries", fake_scan)
     has_actions, count, endpoints = waku.probe_waku_server_actions("http://example")
     assert has_actions is True
     assert count == len(endpoints) >= 1
@@ -186,7 +226,126 @@ def test_probe_waku_server_actions_create_server_refs(monkeypatch):
     def fake_scan(url, **kwargs):  # noqa: ARG001
         return bodies.get(url, {"ok": False, "status_code": 404, "headers": {}, "body": "", "body_snippet": ""})
 
-    monkeypatch.setattr(waku, "scan_with_retry", fake_scan)
+    monkeypatch.setattr(waku, "request_with_retries", fake_scan)
     has_actions, count, endpoints = waku.probe_waku_server_actions("http://example")
     assert has_actions is True
     assert any("createServerReference" in ep for ep, _ in endpoints) or endpoints
+
+
+def test_probe_waku_server_actions_extracts_txt_extension_and_uppercase_hash(monkeypatch):
+    monkeypatch.setattr(
+        waku,
+        "request_with_retries",
+        lambda url, **kwargs: {  # noqa: ARG001
+            "ok": True,
+            "status_code": 200,
+            "headers": {},
+            "body": "/RSC/F/ABCDEF1234567890/act$ion-Name.txt",
+            "body_snippet": "/RSC/F/ABCDEF1234567890/act$ion-Name.txt",
+        },
+    )
+    has_actions, count, endpoints = waku.probe_waku_server_actions("http://example")
+    assert has_actions is True
+    assert count == len(endpoints) >= 1
+    assert any(ep.endswith(".txt") for ep, _ in endpoints)
+    assert any("act$ion-Name" in ep for ep, _ in endpoints)
+
+
+def test_probe_waku_server_actions_extracts_prefetched_rsc_route_endpoints(monkeypatch):
+    monkeypatch.setattr(
+        waku,
+        "request_with_retries",
+        lambda url, **kwargs: {  # noqa: ARG001
+            "ok": True,
+            "status_code": 200,
+            "headers": {},
+            "body": "globalThis.__WAKU_PREFETCHED__ = {'/RSC/index.txt': Promise.resolve(1)};",
+            "body_snippet": "globalThis.__WAKU_PREFETCHED__ = {'/RSC/index.txt': Promise.resolve(1)};",
+        },
+    )
+    has_actions, count, endpoints = waku.probe_waku_server_actions("http://example")
+    assert has_actions is False
+    assert count == len(endpoints) >= 1
+    assert any(ep == "/RSC/index.txt" for ep, _ in endpoints)
+
+
+def test_probe_waku_server_actions_prefetch_does_not_imply_actions(monkeypatch):
+    monkeypatch.setattr(
+        waku,
+        "request_with_retries",
+        lambda url, **kwargs: {  # noqa: ARG001
+            "ok": True,
+            "status_code": 200,
+            "headers": {},
+            "body": "<form action=\"javascript:throw new Error('React form unexpectedly submitted.')\"></form>"
+            "globalThis.__WAKU_PREFETCHED__ = {'/RSC/index.txt': Promise.resolve(1)};",
+            "body_snippet": "<form action=\"javascript:throw new Error('React form unexpectedly submitted.')\"></form>"
+            "globalThis.__WAKU_PREFETCHED__ = {'/RSC/index.txt': Promise.resolve(1)};",
+        },
+    )
+    has_actions, count, endpoints = waku.probe_waku_server_actions("http://example")
+    assert has_actions is False
+    assert count == len(endpoints) >= 1
+    assert any(ep == "/RSC/index.txt" for ep, _ in endpoints)
+
+
+def test_probe_waku_server_actions_follows_imports(monkeypatch):
+    bodies = {
+        "http://example": {
+            "ok": True,
+            "status_code": 200,
+            "headers": {},
+            "body": '<html><body><script type="module" src="/src/components/ActionForm.tsx"></script></body></html>',
+            "body_snippet": "",
+        },
+        "http://example/src/components/ActionForm.tsx": {
+            "ok": True,
+            "status_code": 200,
+            "headers": {"content-type": "text/javascript"},
+            "body": 'import {logFieldUpdate} from "/src/actions.ts";',
+            "body_snippet": "",
+        },
+        "http://example/src/actions.ts": {
+            "ok": True,
+            "status_code": 200,
+            "headers": {"content-type": "text/javascript"},
+            "body": 'createServerReference("/app/src/actions.ts#logFieldUpdate")',
+            "body_snippet": "",
+        },
+    }
+
+    def fake_scan(url, **kwargs):  # noqa: ARG001
+        return bodies.get(
+            url,
+            {
+                "ok": True,
+                "status_code": 404,
+                "headers": {"content-type": "text/plain"},
+                "body": "Not Found",
+                "body_snippet": "Not Found",
+            },
+        )
+
+    monkeypatch.setattr(waku, "request_with_retries", fake_scan)
+    has_actions, count, endpoints = waku.probe_waku_server_actions("http://example")
+    assert has_actions is True
+    assert count == len(endpoints) >= 1
+    assert any("/RSC/ACTION_" in ep for ep, _ in endpoints)
+
+
+def test_probe_waku_server_actions_extracts_prefetched_route_keys(monkeypatch):
+    monkeypatch.setattr(
+        waku,
+        "request_with_retries",
+        lambda url, **kwargs: {  # noqa: ARG001
+            "ok": True,
+            "status_code": 200,
+            "headers": {},
+            "body": 'globalThis.__WAKU_PREFETCHED__ = {"R/_root": Promise.resolve(1)};',
+            "body_snippet": 'globalThis.__WAKU_PREFETCHED__ = {"R/_root": Promise.resolve(1)};',
+        },
+    )
+    has_actions, count, endpoints = waku.probe_waku_server_actions("http://example")
+    assert has_actions is False
+    assert count == len(endpoints) >= 1
+    assert any(ep == "/RSC/R/_root.txt" for ep, _ in endpoints)

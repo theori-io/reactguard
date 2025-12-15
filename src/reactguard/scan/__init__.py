@@ -18,6 +18,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 """Scan orchestration that combines framework and vulnerability detection."""
 
-from .runner import ScanRunner
+from .engine import ScanEngine
 
-__all__ = ["ScanRunner"]
+__all__ = ["ScanEngine"]

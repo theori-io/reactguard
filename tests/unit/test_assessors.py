@@ -156,7 +156,7 @@ class TestReactRouterAssessor(unittest.TestCase):
                 detect_context={
                     "signals": {
                         "react_router_v7": True,
-                        "rsc_dependency_only": True,
+                        "react_bundle_only": True,
                     },
                     "tags": ["react-router-v7"],
                 },

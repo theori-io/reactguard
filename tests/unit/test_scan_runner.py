@@ -1,7 +1,7 @@
 from reactguard.models import FrameworkDetectionResult, ScanRequest
 from reactguard.models.poc import PocStatus
-from reactguard.scan.report import build_scan_report
-from reactguard.scan.runner import ScanRunner
+from reactguard.scan.engine import ScanEngine
+from reactguard.scan.report_builder import build_scan_report
 
 
 class FakeDetectionEngine:
@@ -14,7 +14,7 @@ class FakeDetectionEngine:
         return self.result
 
 
-class FakeVulnRunner:
+class FakeVulnEngine:
     def __init__(self, result):
         self.result = result
         self.calls = []
@@ -24,12 +24,12 @@ class FakeVulnRunner:
         return self.result
 
 
-def test_scan_runner_passes_final_url():
+def test_scan_engine_passes_final_url():
     detection_result = FrameworkDetectionResult(tags=["nextjs"], signals={"final_url": "http://final"})
     vuln_result = {"status": PocStatus.NOT_VULNERABLE, "details": {}}
-    runner = ScanRunner(detection_engine=FakeDetectionEngine(detection_result), vulnerability_runner=FakeVulnRunner(vuln_result))
-    request = ScanRequest(url="http://origin", proxy_profile="p1", correlation_id="cid")
-    report = runner.run(request)
+    engine = ScanEngine(detection_engine=FakeDetectionEngine(detection_result), vulnerability_engine=FakeVulnEngine(vuln_result))
+    request = ScanRequest(url="http://origin")
+    report = engine.run(request)
     assert report.status == PocStatus.NOT_VULNERABLE
 
 

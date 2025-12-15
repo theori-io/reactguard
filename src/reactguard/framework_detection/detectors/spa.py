@@ -28,12 +28,23 @@ from ..constants import (
     SPA_MOUNT_POINT_PATTERN,
     SPA_VITE_ASSETS_PATTERN,
 )
+from ..keys import (
+    SIG_REACT_BUNDLE,
+    SIG_REACT_DOM_BUNDLE,
+    SIG_REACT_SERVER_DOM_BUNDLE,
+    TAG_EXPO,
+    TAG_NEXTJS,
+    TAG_REACT_ROUTER_V7,
+    TAG_REACT_SPA,
+    TAG_REACT_SSR_VITE,
+    TAG_WAKU,
+)
 from ..signals.bundle import probe_js_bundles
 
 
 class SPADetector(FrameworkDetector):
     name = "spa"
-    produces_tags = ["react-spa", "react-ssr-vite"]
+    produces_tags = [TAG_REACT_SPA, TAG_REACT_SSR_VITE]
     priority = 100
 
     def detect(
@@ -46,7 +57,7 @@ class SPADetector(FrameworkDetector):
     ) -> None:
         body_lower = body.lower()
         has_data_reactroot = "data-reactroot" in body_lower
-        framework_tags = {"nextjs", "waku", "expo"}
+        framework_tags = {TAG_NEXTJS, TAG_WAKU, TAG_EXPO}
         if any(tag in tags for tag in framework_tags):
             return
 
@@ -79,16 +90,20 @@ class SPADetector(FrameworkDetector):
             )
             if bundle_signals.get("react_bundle"):
                 spa_signals += 1
-                signals["react_bundle"] = True
+                signals[SIG_REACT_BUNDLE] = True
+            if bundle_signals.get(SIG_REACT_DOM_BUNDLE):
+                signals[SIG_REACT_DOM_BUNDLE] = True
+            if bundle_signals.get(SIG_REACT_SERVER_DOM_BUNDLE):
+                signals[SIG_REACT_SERVER_DOM_BUNDLE] = True
 
-        if spa_signals >= 2 and has_mount and (has_data_reactroot or signals.get("react_bundle")):
-            tags.add("react-spa")
+        if spa_signals >= 2 and has_mount and (has_data_reactroot or signals.get(SIG_REACT_BUNDLE)):
+            tags.add(TAG_REACT_SPA)
             signals["react_spa_structure"] = True
         elif signals.get("vite_modulepreload_assets"):
-            if (signals.get("react_bundle") or signals.get("react_spa_modules")) and (has_data_reactroot or signals.get("react_bundle")):
-                tags.add("react-ssr-vite")
+            if (signals.get(SIG_REACT_BUNDLE) or signals.get("react_spa_modules")) and (has_data_reactroot or signals.get(SIG_REACT_BUNDLE)):
+                tags.add(TAG_REACT_SSR_VITE)
                 signals["react_ssr_vite"] = True
 
     def should_skip(self, tags: TagSet) -> bool:
-        framework_tags = {"nextjs", "waku", "expo", "react-router-v7"}
+        framework_tags = {TAG_NEXTJS, TAG_WAKU, TAG_EXPO, TAG_REACT_ROUTER_V7}
         return any(tag in tags for tag in framework_tags)

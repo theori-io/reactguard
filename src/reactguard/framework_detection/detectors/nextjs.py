@@ -37,6 +37,15 @@ from ..constants import (
     NEXTJS_RSC_FLIGHT_PATTERN_V19_OBJECT_ESCAPED,
     NEXTJS_STATIC_PATH_PATTERN,
 )
+from ..keys import (
+    SIG_RSC_CONTENT_TYPE,
+    SIG_RSC_ENDPOINT_FOUND,
+    SIG_RSC_FLIGHT_PAYLOAD,
+    SIG_SERVER_ACTIONS_ENABLED,
+    TAG_NEXTJS,
+    TAG_NEXTJS_APP_ROUTER,
+    TAG_NEXTJS_PAGES_ROUTER,
+)
 from ..signals.server_actions import (
     ServerActionsSignalApplier,
     probe_server_actions_support,
@@ -45,7 +54,7 @@ from ..signals.server_actions import (
 
 class NextJSDetector(FrameworkDetector):
     name = "nextjs"
-    produces_tags = ["nextjs", "nextjs-app-router", "nextjs-pages-router"]
+    produces_tags = [TAG_NEXTJS, TAG_NEXTJS_APP_ROUTER, TAG_NEXTJS_PAGES_ROUTER]
     priority = 10
 
     @classmethod
@@ -86,14 +95,14 @@ class NextJSDetector(FrameworkDetector):
             is_nextjs = True
             signals["nextjs_data_script"] = True
             if not NEXTJS_NEXT_F_PATTERN.search(body):
-                tags.add("nextjs")
-                tags.add("nextjs-pages-router")
+                tags.add(TAG_NEXTJS)
+                tags.add(TAG_NEXTJS_PAGES_ROUTER)
                 signals["nextjs_pages_router"] = True
 
         if NEXTJS_NEXT_F_PATTERN.search(body):
             is_nextjs = True
-            tags.add("nextjs")
-            tags.add("nextjs-app-router")
+            tags.add(TAG_NEXTJS)
+            tags.add(TAG_NEXTJS_APP_ROUTER)
             signals["nextjs_app_router"] = True
             signals["nextjs_hydration_array"] = True
 
@@ -118,7 +127,7 @@ class NextJSDetector(FrameworkDetector):
             is_nextjs = True
             signals["nextjs_signature"] = True
 
-        if is_nextjs and context.url and signals.get("server_actions_enabled") is None:
+        if is_nextjs and context.url and signals.get(SIG_SERVER_ACTIONS_ENABLED) is None:
             sa_result = probe_server_actions_support(
                 context.url,
                 payload_style="multipart",
@@ -131,13 +140,13 @@ class NextJSDetector(FrameworkDetector):
                 not_found_signal_key="nextjs_action_not_found",
                 vary_signal_key="nextjs_action_vary_rsc",
                 react_major_signal_key="detected_react_major",
-                rsc_flight_signal_key="rsc_flight_payload",
+                rsc_flight_signal_key=SIG_RSC_FLIGHT_PAYLOAD,
                 fallback_html_signal_key="nextjs_probe_html_with_next_marker",
                 default_confidence="medium",
             ).apply(probe_result=sa_result, html_marker_hint=has_next_marker)
 
         if is_nextjs:
-            tags.add("nextjs")
+            tags.add(TAG_NEXTJS)
 
         if signals.get("detected_react_major") is None:
             react_major = self._react_major_from_flight(page_body)
@@ -154,10 +163,10 @@ class NextJSDetector(FrameworkDetector):
                 signals.setdefault("detected_react_major_confidence", "medium")
 
         # Only promote to App Router when we have RSC markers or action support
-        if signals.get("server_actions_enabled") or signals.get("rsc_endpoint_found") or signals.get("rsc_content_type"):
-            if tags.remove("nextjs-pages-router"):
+        if signals.get(SIG_SERVER_ACTIONS_ENABLED) or signals.get(SIG_RSC_ENDPOINT_FOUND) or signals.get(SIG_RSC_CONTENT_TYPE):
+            if tags.remove(TAG_NEXTJS_PAGES_ROUTER):
                 signals["nextjs_pages_router"] = False
-            tags.add("nextjs-app-router")
+            tags.add(TAG_NEXTJS_APP_ROUTER)
 
     def should_skip(self, tags: TagSet) -> bool:
-        return "nextjs" in tags
+        return TAG_NEXTJS in tags

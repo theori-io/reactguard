@@ -29,13 +29,14 @@ from ..constants import (
     EXPO_ROUTER_PATTERN,
     EXPO_STATIC_WEB_PATTERN,
 )
+from ..keys import SIG_REACT_BUNDLE, SIG_REACT_DOM_BUNDLE, SIG_REACT_SERVER_DOM_BUNDLE, TAG_EXPO, TAG_EXPO_RSC, TAG_EXPO_SERVER_ACTIONS
 from ..signals.bundle import probe_js_bundles
 from ..signals.rsc import apply_rsc_probe_results
 
 
 class ExpoDetector(FrameworkDetector):
     name = "expo"
-    produces_tags = ["expo", "expo-rsc", "expo-server-actions"]
+    produces_tags = [TAG_EXPO, TAG_EXPO_RSC, TAG_EXPO_SERVER_ACTIONS]
     priority = 25
 
     def detect(
@@ -72,21 +73,25 @@ class ExpoDetector(FrameworkDetector):
             if bundle_signals.get("expo_router"):
                 signals["expo_router"] = True
             if bundle_signals.get("react_bundle"):
-                signals["react_bundle"] = True
+                signals[SIG_REACT_BUNDLE] = True
+            if bundle_signals.get(SIG_REACT_DOM_BUNDLE):
+                signals[SIG_REACT_DOM_BUNDLE] = True
+            if bundle_signals.get(SIG_REACT_SERVER_DOM_BUNDLE):
+                signals[SIG_REACT_SERVER_DOM_BUNDLE] = True
 
         bundle_hit = bundle_signals.get("expo_router")
         is_expo = bool(has_registry or has_hydrate or bundle_hit or has_router_pkg or has_static_assets or has_reset_style)
 
         if is_expo:
-            tags.add("expo")
+            tags.add(TAG_EXPO)
 
         if is_expo and context.url:
             rsc_result = apply_rsc_probe_results(
                 context.url,
                 tags=tags,
                 signals=signals,
-                rsc_tag="expo-rsc",
-                server_actions_tag="expo-server-actions",
+                rsc_tag=TAG_EXPO_RSC,
+                server_actions_tag=TAG_EXPO_SERVER_ACTIONS,
                 server_actions_imply_rsc=True,
                 set_defaults=True,
             )
@@ -98,4 +103,4 @@ class ExpoDetector(FrameworkDetector):
                 signals["expo_server_actions_experimental"] = True
 
     def should_skip(self, tags: TagSet) -> bool:
-        return "expo" in tags
+        return TAG_EXPO in tags

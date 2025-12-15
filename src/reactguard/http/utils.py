@@ -22,7 +22,6 @@ import logging
 from typing import Any
 
 from ..config import DEFAULT_USER_AGENT, load_http_settings
-from ..errors import ErrorCategory
 from ..utils.context import get_scan_context
 from .client import HttpClient, create_default_http_client
 from .models import HttpRequest
@@ -55,6 +54,32 @@ def get_http_client(refresh: bool = False) -> HttpClient:
     return _shared_http_client
 
 
+def request_with_retries(
+    url: str,
+    *,
+    method: str = "GET",
+    headers: dict[str, str] | None = None,
+    body: str | bytes | None = None,
+    proxy_profile: str | None = None,
+    correlation_id: str | None = None,
+    timeout: float | None = None,
+    allow_redirects: bool = True,
+    http_client: HttpClient | None = None,
+) -> dict[str, Any]:
+    """Execute an HTTP request with retries and return a normalized mapping."""
+    return scan_with_retry(
+        url,
+        method=method,
+        headers=headers,
+        body=body,
+        proxy_profile=proxy_profile,
+        correlation_id=correlation_id,
+        timeout=timeout,
+        allow_redirects=allow_redirects,
+        http_client=http_client,
+    )
+
+
 def scan_with_retry(
     url: str,
     *,
@@ -72,8 +97,6 @@ def scan_with_retry(
     context = get_scan_context()
     request_headers = dict(headers or {})
     request_headers.setdefault("User-Agent", settings.user_agent)
-    effective_proxy_profile = proxy_profile if proxy_profile is not None else context.proxy_profile
-    effective_correlation_id = correlation_id if correlation_id is not None else context.correlation_id
     client = http_client or context.http_client or get_http_client()
     effective_timeout = timeout if timeout is not None else (context.timeout if context.timeout is not None else settings.timeout)
 
@@ -84,29 +107,29 @@ def scan_with_retry(
         body=body,
         timeout=effective_timeout,
         allow_redirects=allow_redirects,
-        proxy=effective_proxy_profile,
-        correlation_id=effective_correlation_id,
     )
 
     response = send_with_retries(client, request)
 
-    return {
+    result: dict[str, Any] = {
         "ok": response.ok,
         "status_code": response.status_code,
         "headers": response.headers,
         "body": response.text,
         "body_snippet": response.body_snippet,
         "url": response.url or url,
-        "error_category": response.error_category or ErrorCategory.NONE.value,
         "error_message": response.error_message,
         "error_type": response.error_type,
     }
+    if result.get("ok") is False and result.get("error_message") and result.get("error") is None:
+        result["error"] = result["error_message"]
+    return result
 
 
 __all__ = [
     "DEFAULT_USER_AGENT",
-    "ErrorCategory",
     "get_http_client",
+    "request_with_retries",
     "scan_with_retry",
     "set_shared_http_client",
 ]

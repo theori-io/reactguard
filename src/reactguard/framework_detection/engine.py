@@ -33,6 +33,20 @@ from ..models import FrameworkDetectionResult, ScanRequest
 from ..utils import TagSet, extract_versions
 from ..utils.context import scan_context
 from .base import DetectionContext
+from .keys import (
+    SIG_DETECTION_CONFIDENCE,
+    SIG_DETECTION_CONFIDENCE_BREAKDOWN,
+    SIG_DETECTION_CONFIDENCE_LEVEL,
+    SIG_DETECTOR_ERRORS,
+    SIG_FETCH_ERROR_MESSAGE,
+    SIG_FINAL_URL,
+    SIG_REACT_BUNDLE,
+    SIG_REACT_BUNDLE_ONLY,
+    SIG_REACT_SERVER_DOM_BUNDLE,
+    SIG_RSC_DEPENDENCY_ONLY,
+    SIG_RSC_ENDPOINT_FOUND,
+    TAG_RSC,
+)
 from .registry import DETECTORS
 from .scoring import score_confidence
 
@@ -46,15 +60,11 @@ class FrameworkDetectionEngine:
         self.http_client = http_client or create_default_http_client()
 
     def detect(self, request: ScanRequest) -> FrameworkDetectionResult:
-        with scan_context(
-            proxy_profile=request.proxy_profile,
-            correlation_id=request.correlation_id,
-            http_client=self.http_client,
-        ):
+        with scan_context(http_client=self.http_client, proxy_profile=request.proxy_profile, correlation_id=request.correlation_id):
             response = request.response or self._fetch(request)
             signals = self._initial_signals(response)
             if response and response.url:
-                signals["final_url"] = response.url
+                signals[SIG_FINAL_URL] = response.url
             headers = self._normalize_headers(request, response)
             body = self._resolve_body(request, response)
             tags = TagSet()
@@ -76,8 +86,6 @@ class FrameworkDetectionEngine:
             method="GET",
             headers=request.request_headers,
             allow_redirects=True,
-            proxy=request.proxy_profile,
-            correlation_id=request.correlation_id,
         )
         response = send_with_retries(self.http_client, http_request)
 
@@ -86,7 +94,7 @@ class FrameworkDetectionEngine:
                 "Initial fetch failed for %s: %s (%s)",
                 request.url,
                 response.error_message,
-                response.error_category,
+                response.error_type,
             )
         return response
 
@@ -94,8 +102,7 @@ class FrameworkDetectionEngine:
     def _initial_signals(response) -> dict[str, Any]:
         if response and not response.ok:
             return {
-                "fetch_error_category": response.error_category,
-                "fetch_error_message": response.error_message,
+                SIG_FETCH_ERROR_MESSAGE: response.error_message,
             }
         return {}
 
@@ -115,9 +122,7 @@ class FrameworkDetectionEngine:
 
     def _build_context(self, request: ScanRequest, response) -> DetectionContext:
         return DetectionContext(
-            url=request.url or (response.url if response else None),
-            proxy_profile=request.proxy_profile,
-            correlation_id=request.correlation_id,
+            url=(response.url if response and response.url else request.url),
             http_client=self.http_client,
         )
 
@@ -145,18 +150,21 @@ class FrameworkDetectionEngine:
                 detector.detect(body, headers, tags, signals, context)
             except Exception as exc:  # noqa: BLE001
                 logger.exception("Detector %s failed: %s", detector.name, exc)
-                signals.setdefault("detector_errors", []).append(detector.name)
+                signals.setdefault(SIG_DETECTOR_ERRORS, []).append(detector.name)
 
     @staticmethod
     def _apply_confidence(signals: dict[str, Any]) -> None:
         confidence_score, confidence_level, breakdown = score_confidence(signals)
-        signals["detection_confidence"] = confidence_score
-        signals["detection_confidence_level"] = confidence_level
-        signals["detection_confidence_breakdown"] = breakdown
+        signals[SIG_DETECTION_CONFIDENCE] = confidence_score
+        signals[SIG_DETECTION_CONFIDENCE_LEVEL] = confidence_level
+        signals[SIG_DETECTION_CONFIDENCE_BREAKDOWN] = breakdown
 
     @staticmethod
     def _apply_rsc_flags(tags: TagSet, signals: dict[str, Any]) -> None:
-        has_rsc_library = signals.get("react_bundle")
-        has_rsc_endpoint = signals.get("rsc_endpoint_found") or "rsc" in tags
-        if has_rsc_library and not has_rsc_endpoint:
-            signals["rsc_dependency_only"] = True
+        has_react_bundle = signals.get(SIG_REACT_BUNDLE)
+        has_rsc_runtime = signals.get(SIG_REACT_SERVER_DOM_BUNDLE)
+        has_rsc_endpoint = signals.get(SIG_RSC_ENDPOINT_FOUND) or TAG_RSC in tags
+        if has_rsc_runtime and not has_rsc_endpoint:
+            signals[SIG_RSC_DEPENDENCY_ONLY] = True
+        if has_react_bundle and not has_rsc_endpoint and not has_rsc_runtime:
+            signals[SIG_REACT_BUNDLE_ONLY] = True

@@ -28,6 +28,7 @@ from ..constants import (
     RR_MANIFEST_PATTERN,
     RR_VERSION_PATTERN,
 )
+from ..keys import TAG_REACT_ROUTER_V5, TAG_REACT_ROUTER_V6, TAG_REACT_ROUTER_V7, TAG_REACT_ROUTER_V7_RSC, TAG_REACT_ROUTER_V7_SERVER_ACTIONS
 from ..signals.bundle import probe_js_bundles
 from ..signals.rsc import apply_rsc_probe_results
 
@@ -35,11 +36,11 @@ from ..signals.rsc import apply_rsc_probe_results
 class ReactRouterDetector(FrameworkDetector):
     name = "react_router"
     produces_tags = [
-        "react-router-v5",
-        "react-router-v6",
-        "react-router-v7",
-        "react-router-v7-rsc",
-        "react-router-v7-server-actions",
+        TAG_REACT_ROUTER_V5,
+        TAG_REACT_ROUTER_V6,
+        TAG_REACT_ROUTER_V7,
+        TAG_REACT_ROUTER_V7_RSC,
+        TAG_REACT_ROUTER_V7_SERVER_ACTIONS,
     ]
     priority = 20
 
@@ -106,13 +107,13 @@ class ReactRouterDetector(FrameworkDetector):
                 confidence = "medium"
 
         if detected_version == "v7":
-            tags.add("react-router-v7")
+            tags.add(TAG_REACT_ROUTER_V7)
             signals["react_router_v7"] = True
         elif detected_version == "v6":
-            tags.add("react-router-v6")
+            tags.add(TAG_REACT_ROUTER_V6)
             signals["react_router_v6"] = True
         elif detected_version == "v5":
-            tags.add("react-router-v5")
+            tags.add(TAG_REACT_ROUTER_V5)
             signals["react_router_v5"] = True
 
         if detected_version:
@@ -123,6 +124,6 @@ class ReactRouterDetector(FrameworkDetector):
                 context.url,
                 tags=tags,
                 signals=signals,
-                rsc_tag="react-router-v7-rsc",
-                server_actions_tag="react-router-v7-server-actions",
+                rsc_tag=TAG_REACT_ROUTER_V7_RSC,
+                server_actions_tag=TAG_REACT_ROUTER_V7_SERVER_ACTIONS,
             )
