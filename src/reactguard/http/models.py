@@ -20,7 +20,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 """HTTP request/response data models used across ReactGuard."""
 
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -51,6 +51,7 @@ class HttpResponse:
     text: str = ""
     content: bytes = b""
     url: str | None = None
+    error_category: str | None = None
     error_message: str | None = None
     error_type: str | None = None
     meta: dict[str, Any] = field(default_factory=dict)
@@ -63,12 +64,7 @@ class HttpResponse:
     @classmethod
     def from_mapping(cls, data: Mapping[str, Any]) -> HttpResponse:
         """Helper to normalize dictionary-like responses (e.g., worker scan output)."""
-        raw_headers: Any = data.get("headers") or {}
-        if raw_headers and not isinstance(raw_headers, Mapping):
-            try:
-                raw_headers = dict(raw_headers)
-            except Exception:
-                raw_headers = {}
+        raw_headers = data.get("headers") or {}
         headers: Headers = {}
         if isinstance(raw_headers, Mapping):
             for key, value in raw_headers.items():
@@ -101,9 +97,10 @@ class HttpResponse:
             text=text,
             content=content,
             url=data.get("url"),
+            error_category=data.get("error_category"),
             error_message=data.get("error_message"),
             error_type=data.get("error_type"),
-            meta={k: v for k, v in data.items() if k not in {"ok", "status_code", "headers", "body", "body_snippet", "url", "error_message", "error_type"}},
+            meta={k: v for k, v in data.items() if k not in {"ok", "status_code", "headers", "body", "body_snippet", "url", "error_category", "error_message", "error_type"}},
         )
 
 
@@ -114,6 +111,8 @@ class RetryConfig:
     max_attempts: int = 2
     backoff_factor: float = 2.0
     initial_delay: float = 1.0
+    retry_on: Iterable[str] = field(default_factory=set)
+    retry_never: Iterable[str] = field(default_factory=set)
 
     @classmethod
     def from_settings(cls, settings: HttpSettings) -> RetryConfig:

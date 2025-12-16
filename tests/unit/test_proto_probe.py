@@ -58,7 +58,7 @@ class TestProtoProbe(unittest.TestCase):
 
     def test_run_action_probes_adds_ids_and_errors(self):
         def fake_probe(url, action_id=None, **kwargs):
-            return {"ok": False, "error_message": "TIMEOUT", "error_type": "Timeout", "headers": {}, "body_snippet": ""}
+            return {"ok": False, "error_category": "TIMEOUT", "headers": {}, "body_snippet": ""}
 
         def fake_control(url, action_id=None, **kwargs):
             return {"ok": True, "status_code": 200}
@@ -73,7 +73,7 @@ class TestProtoProbe(unittest.TestCase):
 
         self.assertEqual([r["action_id"] for r in probe_results], actions)
         self.assertEqual(control_result.get("action_id"), "control_probe")
-        self.assertEqual(probe_results[0].get("error_message"), "TIMEOUT")
+        self.assertEqual(probe_results[0].get("error_category"), "TIMEOUT")
 
 
 if __name__ == "__main__":

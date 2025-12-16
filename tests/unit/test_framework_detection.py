@@ -53,10 +53,10 @@ def test_framework_detection_engine_runs_detectors(monkeypatch):
 def test_framework_detection_engine_fetch_error(monkeypatch):
     monkeypatch.setattr(
         "reactguard.framework_detection.engine.send_with_retries",
-        lambda *_, **__: HttpResponse(ok=False, error_message="fail", error_type="TimeoutException", url="http://example"),
+        lambda *_, **__: HttpResponse(ok=False, error_category="TIMEOUT", error_message="fail", url="http://example"),
     )
     result = FrameworkDetectionEngine().detect(ScanRequest(url="http://example"))
-    assert result.signals["fetch_error_message"] == "fail"
+    assert result.signals["fetch_error_category"] == "TIMEOUT"
 
 
 def test_normalize_headers_merges_response_headers():

@@ -38,6 +38,7 @@ from .keys import (
     SIG_DETECTION_CONFIDENCE_BREAKDOWN,
     SIG_DETECTION_CONFIDENCE_LEVEL,
     SIG_DETECTOR_ERRORS,
+    SIG_FETCH_ERROR_CATEGORY,
     SIG_FETCH_ERROR_MESSAGE,
     SIG_FINAL_URL,
     SIG_REACT_BUNDLE,
@@ -94,7 +95,7 @@ class FrameworkDetectionEngine:
                 "Initial fetch failed for %s: %s (%s)",
                 request.url,
                 response.error_message,
-                response.error_type,
+                response.error_category,
             )
         return response
 
@@ -102,6 +103,7 @@ class FrameworkDetectionEngine:
     def _initial_signals(response) -> dict[str, Any]:
         if response and not response.ok:
             return {
+                SIG_FETCH_ERROR_CATEGORY: response.error_category,
                 SIG_FETCH_ERROR_MESSAGE: response.error_message,
             }
         return {}
@@ -122,7 +124,7 @@ class FrameworkDetectionEngine:
 
     def _build_context(self, request: ScanRequest, response) -> DetectionContext:
         return DetectionContext(
-            url=(response.url if response and response.url else request.url),
+            url=request.url or (response.url if response else None),
             http_client=self.http_client,
         )
 

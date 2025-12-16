@@ -26,6 +26,7 @@ from typing import Any
 from urllib.parse import urljoin
 
 from ...config import load_http_settings
+from ...errors import ErrorCategory
 from ...http import request_with_retries
 from ...http.client import HttpClient
 from ...utils import TagSet
@@ -171,6 +172,7 @@ def _probe_server_actions_support_ctx(
     if not base_url:
         return {
             "supported": False,
+            "error_category": ErrorCategory.UNKNOWN_ERROR.value,
             "error_message": "No base URL provided",
         }
 
@@ -286,8 +288,8 @@ def _probe_server_actions_support_ctx(
         "react_major_from_flight": react_major_from_flight,
         "body_snippet": resp.get("body_snippet", ""),
         "body": resp.get("body"),
+        "error_category": resp.get("error_category"),
         "error_message": resp.get("error_message"),
-        "error_type": resp.get("error_type"),
         "payload_style": payload_style,
         "ok": resp.get("ok", False),
         "probe_url": target_url,
@@ -358,8 +360,7 @@ def _detect_server_actions_ctx(
             "supported": False,
             "confidence": "none",
             "reason": scan.get("error_message", "Probe failed"),
-            "error_message": scan.get("error_message"),
-            "error_type": scan.get("error_type"),
+            "error_category": scan.get("error_category"),
         }
 
     status_code = scan.get("status_code", 0)

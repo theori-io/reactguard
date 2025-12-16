@@ -25,6 +25,7 @@ from .models import Headers, HttpRequest, HttpResponse, RetryConfig
 from .retry import build_default_retry_config, send_with_retries
 from .utils import (
     DEFAULT_USER_AGENT,
+    ErrorCategory,
     get_http_client,
     request_with_retries,
     scan_with_retry,
@@ -33,6 +34,7 @@ from .utils import (
 
 __all__ = [
     "DEFAULT_USER_AGENT",
+    "ErrorCategory",
     "Headers",
     "HttpClient",
     "HttpxClient",

@@ -23,6 +23,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 import time
 
 from ..config import load_http_settings
+from ..errors import ErrorCategory, categorize_exception
 from .client import HttpClient
 from .models import HttpRequest, HttpResponse, RetryConfig
 
@@ -30,7 +31,15 @@ from .models import HttpRequest, HttpResponse, RetryConfig
 def build_default_retry_config() -> RetryConfig:
     """Create a RetryConfig from environment-backed HttpSettings."""
     settings = load_http_settings()
-    return RetryConfig.from_settings(settings)
+    cfg = RetryConfig.from_settings(settings)
+    cfg.retry_on = {
+        ErrorCategory.TIMEOUT.value,
+        ErrorCategory.CONNECTION_ERROR.value,
+        ErrorCategory.DNS_ERROR.value,
+        ErrorCategory.UNKNOWN_ERROR.value,
+    }
+    cfg.retry_never = {ErrorCategory.WAF_SUSPECTED.value, ErrorCategory.SSL_ERROR.value}
+    return cfg
 
 
 def send_with_retries(
@@ -60,8 +69,10 @@ def send_with_retries(
         try:
             response = client.request(request)
         except Exception as exc:  # noqa: BLE001
+            category = categorize_exception(exc).value
             response = HttpResponse(
                 ok=False,
+                error_category=category,
                 error_message=str(exc),
                 error_type=exc.__class__.__name__,
             )
@@ -72,11 +83,8 @@ def send_with_retries(
                 response.meta["retry_count"] = attempt
             return response
 
-        # Only retry transport-level failures (no status code). Some adapters may set `ok=False`
-        # for HTTP error responses, which should not be blindly retried.
-        if response.status_code is not None:
-            if attempt:
-                response.meta.setdefault("retry_count", attempt)
+        category = response.error_category or ""
+        if category in cfg.retry_never or category not in cfg.retry_on:
             return response
 
         attempt += 1
@@ -93,9 +101,8 @@ def send_with_retries(
         delay *= cfg.backoff_factor
 
     if last_response is not None:
-        last_response.meta.setdefault("retry_count", attempt)
-        last_response.meta.setdefault("retry_exhausted", True)
         return last_response
 
+    error_category = ErrorCategory.TIMEOUT.value if deadline else ErrorCategory.UNKNOWN_ERROR.value
     error_message = "Retry budget exhausted" if deadline else None
-    return HttpResponse(ok=False, error_message=error_message, meta={"retry_count": attempt, "retry_exhausted": True})
+    return HttpResponse(ok=False, error_category=error_category, error_message=error_message)

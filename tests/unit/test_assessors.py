@@ -47,13 +47,12 @@ class TestNextJSAssessor(unittest.TestCase):
         with (
             patch("reactguard.vulnerability_detection.assessors.nextjs.generate_action_ids", return_value=fake_actions),
             patch(
-                "reactguard.vulnerability_detection.assessors.nextjs.send_proto_probe",
-                return_value={"ok": True, "status_code": 500, "headers": {}, "body_snippet": "err"},
-            ) as proto,
-            patch(
-                "reactguard.vulnerability_detection.assessors.nextjs.send_control_probe",
-                return_value={"ok": True, "status_code": 200, "headers": {}, "body_snippet": "ok"},
-            ) as control,
+                "reactguard.vulnerability_detection.assessors.nextjs.ActionProbeRunner.run",
+                return_value=(
+                    [{"status_code": 500, "body": "err", "headers": {}, "body_snippet": "err"}] * 3,
+                    {"status_code": 200, "body": "ok", "headers": {}, "body_snippet": "ok"},
+                ),
+            ) as run_probes,
             patch("reactguard.vulnerability_detection.assessors.nextjs.MultiActionAnalyzer") as analyzer_cls,
         ):
             analyzer_cls.return_value.analyze.return_value = {"status": PocStatus.NOT_VULNERABLE, "details": {"confidence": "medium"}}
@@ -64,8 +63,7 @@ class TestNextJSAssessor(unittest.TestCase):
             )
 
         self.assertEqual(result["status"], PocStatus.NOT_VULNERABLE)
-        self.assertEqual(proto.call_count, 3)
-        control.assert_called_once()
+        run_probes.assert_called_once_with(fake_actions, control_action_id=fake_actions[0])
         analyzer_cls.return_value.analyze.assert_called_once()
         self.assertEqual(analyzer_cls.return_value.analyze.call_args.kwargs["action_ids"], fake_actions)
         self.assertTrue(analyzer_cls.call_args.kwargs["server_actions_expected"])

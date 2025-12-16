@@ -69,7 +69,7 @@ class TestMultiActionInterpreter(unittest.TestCase):
         self.assertEqual(result["status"], PocStatus.LIKELY_NOT_VULNERABLE)
         self.assertIn("distinct error digests", result["details"]["reason"].lower())
 
-    def test_action_validation_returns_likely_not_vulnerable(self):
+    def test_action_validation_returns_inconclusive(self):
         probe_results = [
             {
                 "action_id": "40aaaa",
@@ -85,7 +85,7 @@ class TestMultiActionInterpreter(unittest.TestCase):
             is_rsc_framework=True,
         )
 
-        self.assertEqual(result["status"], PocStatus.LIKELY_NOT_VULNERABLE)
+        self.assertEqual(result["status"], PocStatus.INCONCLUSIVE)
         self.assertIs(result["details"].get("decode_surface_reached"), False)
         self.assertIn("action validation", result["details"]["reason"].lower())
 

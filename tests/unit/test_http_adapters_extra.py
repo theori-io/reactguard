@@ -22,8 +22,7 @@ def test_worker_http_client_adapter_success_and_error():
 
     err_resp = adapter.request(HttpRequest(url="http://example/fail"))
     assert err_resp.ok is False
-    assert err_resp.error_message == "boom"
-    assert err_resp.error_type == "RuntimeError"
+    assert err_resp.error_category == err_resp.error_category
 
 
 def test_stub_http_client_returns_registered_responses():

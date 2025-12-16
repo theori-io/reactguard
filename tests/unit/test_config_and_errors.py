@@ -1,7 +1,12 @@
 import importlib
+import socket
+import ssl
+
+import httpx
 
 from reactguard import config
 from reactguard.config import DEFAULT_USER_AGENT
+from reactguard.errors import ErrorCategory, categorize_exception, error_category_to_reason
 
 
 def test_http_settings_env_overrides(monkeypatch):
@@ -64,3 +69,24 @@ def test_load_http_settings_reads_env_at_call_time(monkeypatch):
     assert config.load_http_settings().timeout == 7.7
     monkeypatch.setenv("REACTGUARD_HTTP_TIMEOUT", "8.8")
     assert config.load_http_settings().timeout == 8.8
+
+
+def test_categorize_exception_mappings():
+    assert categorize_exception(httpx.TimeoutException("t")) is ErrorCategory.TIMEOUT
+    assert categorize_exception(httpx.ConnectError("c", request=None)) is ErrorCategory.CONNECTION_ERROR
+    assert categorize_exception(ssl.SSLError("bad ssl")) is ErrorCategory.SSL_ERROR
+    assert categorize_exception(socket.gaierror()) is ErrorCategory.DNS_ERROR
+    assert categorize_exception(ConnectionResetError()) is ErrorCategory.CONNECTION_ERROR
+
+    class WithResponse(Exception):
+        def __init__(self, status_code):
+            self.response = type("Resp", (), {"status_code": status_code})()
+
+    assert categorize_exception(WithResponse(403)) is ErrorCategory.WAF_SUSPECTED
+    assert categorize_exception(RuntimeError("other")) is ErrorCategory.UNKNOWN_ERROR
+
+
+def test_error_category_to_reason():
+    assert "timeout" in error_category_to_reason(ErrorCategory.TIMEOUT).lower()
+    assert error_category_to_reason(None) == ""
+    assert error_category_to_reason("unmapped") == "Probe failed due to network error"

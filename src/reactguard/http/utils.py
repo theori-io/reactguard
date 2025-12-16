@@ -22,6 +22,7 @@ import logging
 from typing import Any
 
 from ..config import DEFAULT_USER_AGENT, load_http_settings
+from ..errors import ErrorCategory
 from ..utils.context import get_scan_context
 from .client import HttpClient, create_default_http_client
 from .models import HttpRequest
@@ -111,23 +112,22 @@ def scan_with_retry(
 
     response = send_with_retries(client, request)
 
-    result: dict[str, Any] = {
+    return {
         "ok": response.ok,
         "status_code": response.status_code,
         "headers": response.headers,
         "body": response.text,
         "body_snippet": response.body_snippet,
         "url": response.url or url,
+        "error_category": response.error_category or ErrorCategory.NONE.value,
         "error_message": response.error_message,
         "error_type": response.error_type,
     }
-    if result.get("ok") is False and result.get("error_message") and result.get("error") is None:
-        result["error"] = result["error_message"]
-    return result
 
 
 __all__ = [
     "DEFAULT_USER_AGENT",
+    "ErrorCategory",
     "get_http_client",
     "request_with_retries",
     "scan_with_retry",

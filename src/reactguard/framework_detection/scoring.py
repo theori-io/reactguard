@@ -56,15 +56,6 @@ _DEFAULT_STRONG_SIGNAL_WEIGHTS: dict[str, int] = {
     "waku_root": 24,
     "waku_header": 18,
     "waku_meta_generator": 26,
-    # Some older Waku variants (0.17-0.20 in our lab) do not expose the meta generator or version header,
-    # but still have stable Waku-specific globals and bootstrapping markers.
-    "waku_vars": 14,
-    "waku_module_cache": 12,
-    "waku_legacy_architecture": 20,
-    "waku_rsc_surface": 10,
-    # Newer Waku builds sometimes serve an ultra-minimal HTML shell and require fetching a module script
-    # to reveal Waku globals; treat that probe as a strong signal when it hits.
-    "waku_minimal_html": 18,
     # React Router
     "react_router_manifest": 16,
     "react_router_version": 14,
@@ -73,7 +64,6 @@ _DEFAULT_STRONG_SIGNAL_WEIGHTS: dict[str, int] = {
     "react_router_v5_bundle": 10,
     # Expo
     "expo_router": 14,
-    "expo_registry": 18,
     # Attack surface
     "server_actions_enabled": 8,
 }

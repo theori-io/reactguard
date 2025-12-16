@@ -22,3 +22,4 @@ def test_discover_next_action_ids_scrapes_inline_and_assets(monkeypatch):
 
     monkeypatch.setattr(probe, "_scan_once", fake_scan_once)
     assert probe.discover_next_action_ids("http://example/app", timeout=0.1) == ["40submit", "40echo"]
+

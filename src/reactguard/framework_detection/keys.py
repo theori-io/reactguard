@@ -42,6 +42,7 @@ SIG_DETECTION_CONFIDENCE = "detection_confidence"
 SIG_DETECTION_CONFIDENCE_BREAKDOWN = "detection_confidence_breakdown"
 SIG_DETECTION_CONFIDENCE_LEVEL = "detection_confidence_level"
 SIG_DETECTOR_ERRORS = "detector_errors"
+SIG_FETCH_ERROR_CATEGORY = "fetch_error_category"
 SIG_FETCH_ERROR_MESSAGE = "fetch_error_message"
 SIG_FINAL_URL = "final_url"
 SIG_REACT_BUNDLE = "react_bundle"
@@ -78,6 +79,7 @@ __all__ = [
     "SIG_DETECTION_CONFIDENCE_BREAKDOWN",
     "SIG_DETECTION_CONFIDENCE_LEVEL",
     "SIG_DETECTOR_ERRORS",
+    "SIG_FETCH_ERROR_CATEGORY",
     "SIG_FETCH_ERROR_MESSAGE",
     "SIG_FINAL_URL",
     "SIG_REACT_BUNDLE",

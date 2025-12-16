@@ -23,7 +23,6 @@ from urllib.parse import urljoin, urlparse
 
 from ...http import request_with_retries
 from ...http.client import HttpClient
-from ...http.url import build_base_dir_url, build_endpoint_candidates, same_origin
 from ...utils.context import scan_context
 
 
@@ -31,11 +30,21 @@ def extract_js_urls(body: str, base_url: str) -> list[str]:
     js_urls = set()
 
     for match in re.findall(
-        r'<script[^>]+src=["\']([^"\']+\.(?:js|mjs|cjs|jsx|tsx)(?:\?[^"\']*)?)["\']',
+        r'<script[^>]+src=["\']([^"\']+\.(?:js|mjs|cjs)(?:\?[^"\']*)?)["\']',
         body,
         re.IGNORECASE,
     ):
         js_urls.add(match)
+
+    for match in re.findall(
+        r'<script[^>]+src=["\']([^"\']+\.(jsx|tsx))["\']',
+        body,
+        re.IGNORECASE,
+    ):
+        if isinstance(match, tuple):
+            js_urls.add(match[0])
+        else:
+            js_urls.add(match)
 
     for match in re.findall(
         r'<link[^>]+href=["\']([^"\']+\.(?:js|mjs|cjs)(?:\?[^"\']*)?)["\']',
@@ -48,35 +57,17 @@ def extract_js_urls(body: str, base_url: str) -> list[str]:
         if "/" in match:
             js_urls.add(match)
 
-    normalized: set[str] = set()
+    normalized = set()
     base_scheme = urlparse(base_url).scheme or "http"
-    base_dir = build_base_dir_url(base_url)
-
     for js_url in js_urls:
-        if js_url.startswith(("http://", "https://")):
-            if same_origin(base_url, js_url):
-                normalized.add(js_url)
-            continue
-
-        if js_url.startswith("//"):
-            absolute = f"{base_scheme}:{js_url}"
-            if same_origin(base_url, absolute):
-                normalized.add(absolute)
-            continue
-
-        if js_url.startswith("/"):
-            for candidate in build_endpoint_candidates(base_url, js_url):
-                if same_origin(base_url, candidate):
-                    normalized.add(candidate)
-            continue
-
-        # Page-relative: resolve both as file-relative and dir-relative to handle `/app` vs `/app/`.
-        primary = urljoin(base_url, js_url)
-        if same_origin(base_url, primary):
-            normalized.add(primary)
-        secondary = urljoin(base_dir, js_url)
-        if same_origin(base_url, secondary):
-            normalized.add(secondary)
+        if js_url.startswith("http://") or js_url.startswith("https://"):
+            normalized.add(js_url)
+        elif js_url.startswith("//"):
+            normalized.add(f"{base_scheme}:{js_url}")
+        elif js_url.startswith("/"):
+            normalized.add(urljoin(base_url, js_url))
+        else:
+            normalized.add(urljoin(base_url, js_url))
 
     def priority_score(url: str) -> int:
         url_lower = url.lower()
@@ -90,7 +81,7 @@ def extract_js_urls(body: str, base_url: str) -> list[str]:
             return 3
         return 4
 
-    sorted_urls = sorted(normalized, key=lambda url: (priority_score(url), url))
+    sorted_urls = sorted(normalized, key=priority_score)
     return sorted_urls[:20]
 
 

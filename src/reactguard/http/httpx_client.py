@@ -24,6 +24,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 import httpx
 
 from ..config import HttpSettings, load_http_settings
+from ..errors import categorize_exception
 from .client import HttpClient
 from .models import HttpRequest, HttpResponse
 
@@ -91,8 +92,10 @@ class HttpxClient(HttpClient):
                 },
             )
         except Exception as exc:  # noqa: BLE001
+            category = categorize_exception(exc)
             return HttpResponse(
                 ok=False,
+                error_category=category.value,
                 error_message=str(exc),
                 error_type=type(exc).__name__,
             )

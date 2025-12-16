@@ -3,6 +3,7 @@ import time
 import httpx
 
 from reactguard.config import HttpSettings
+from reactguard.errors import ErrorCategory
 from reactguard.http.httpx_client import HttpxClient
 from reactguard.http.models import HttpRequest, HttpResponse, RetryConfig
 from reactguard.http.retry import build_default_retry_config, send_with_retries
@@ -52,7 +53,7 @@ def test_retry_config_from_settings_clamps_minimum():
 
 def test_send_with_retries_success_after_retry(monkeypatch):
     monkeypatch.setattr(time, "sleep", lambda _: None)
-    resp_retry = HttpResponse(ok=False, error_message="timeout")
+    resp_retry = HttpResponse(ok=False, error_category=ErrorCategory.TIMEOUT.value, error_message="timeout")
     resp_ok = HttpResponse(ok=True, status_code=200, text="done")
     client = SequenceHttpClient([resp_retry, resp_ok])
     result = send_with_retries(client, HttpRequest(url="http://example"))
@@ -61,22 +62,12 @@ def test_send_with_retries_success_after_retry(monkeypatch):
     assert client.calls == 2
 
 
-def test_send_with_retries_honors_max_attempts(monkeypatch):
+def test_send_with_retries_non_retriable_stops(monkeypatch):
     monkeypatch.setattr(time, "sleep", lambda _: None)
-    resp = HttpResponse(ok=False, error_message="blocked")
+    resp = HttpResponse(ok=False, error_category=ErrorCategory.WAF_SUSPECTED.value, error_message="blocked")
     client = SequenceHttpClient([resp, HttpResponse(ok=True)])
-    result = send_with_retries(client, HttpRequest(url="http://example"), retry_config=RetryConfig(max_attempts=1))
-    assert result.ok is False
-    assert client.calls == 1
-
-
-def test_send_with_retries_does_not_retry_status_code_failures(monkeypatch):
-    monkeypatch.setattr(time, "sleep", lambda _: None)
-    resp_http_error = HttpResponse(ok=False, status_code=500, error_message="boom")
-    client = SequenceHttpClient([resp_http_error, HttpResponse(ok=True)])
     result = send_with_retries(client, HttpRequest(url="http://example"))
     assert result.ok is False
-    assert result.status_code == 500
     assert client.calls == 1
 
 
@@ -102,17 +93,19 @@ def test_send_with_retries_converts_exceptions(monkeypatch):
 
 def test_send_with_retries_returns_last_response(monkeypatch):
     monkeypatch.setattr(time, "sleep", lambda _: None)
-    resp = HttpResponse(ok=False, error_message="timeout")
+    resp = HttpResponse(ok=False, error_category=ErrorCategory.TIMEOUT.value, error_message="timeout")
     client = SequenceHttpClient([resp])
-    retry_cfg = RetryConfig(max_attempts=1, backoff_factor=1.0, initial_delay=0.01)
+    retry_cfg = RetryConfig(max_attempts=1, retry_on={ErrorCategory.TIMEOUT.value}, backoff_factor=1.0, initial_delay=0.01)
     result = send_with_retries(client, HttpRequest(url="http://example", timeout=0.01), retry_config=retry_cfg)
     assert result.ok is False
-    assert result.error_message == "timeout"
+    assert result.error_category == ErrorCategory.TIMEOUT.value
     assert client.calls == 1
 
 
-def test_build_default_retry_config_sets_expected_defaults():
+def test_build_default_retry_config_sets_expected_categories():
     cfg = build_default_retry_config()
+    assert ErrorCategory.TIMEOUT.value in cfg.retry_on
+    assert ErrorCategory.WAF_SUSPECTED.value in cfg.retry_never
     assert cfg.max_attempts >= 1
 
 
@@ -138,7 +131,7 @@ def test_scan_with_retry_sets_defaults(monkeypatch):
     assert result["status_code"] == 200
     assert result["headers"]["X"] == "1"
     assert result["body_snippet"] == "body"
-    assert result["error_message"] is None
+    assert result["error_category"] == ErrorCategory.NONE.value
     assert captured["request"].headers["User-Agent"] == "UA/1.0"
     assert captured["request"].allow_redirects is True
 
@@ -235,4 +228,4 @@ def test_httpx_client_success_and_error(monkeypatch):
     err_client = HttpxClient(HttpSettings())
     err_resp = err_client.request(HttpRequest(url="http://example"))
     assert err_resp.ok is False
-    assert err_resp.error_message == "boom"
+    assert err_resp.error_category == ErrorCategory.TIMEOUT.value

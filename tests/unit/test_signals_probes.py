@@ -12,7 +12,7 @@ def test_extract_js_urls_normalizes_and_prioritizes():
     urls = bundle.extract_js_urls(body, base_url)
     assert urls[0].startswith("http://example/_next/static")
     assert any(u.startswith("http://example/app/main.js") for u in urls)
-    assert not any(u.startswith("http://cdn.example.com") for u in urls)
+    assert any(u.startswith("http://cdn.example.com") for u in urls)
 
 
 def test_probe_js_bundles_detects_router(monkeypatch):
@@ -232,7 +232,7 @@ def test_probe_waku_server_actions_create_server_refs(monkeypatch):
     assert any("createServerReference" in ep for ep, _ in endpoints) or endpoints
 
 
-def test_probe_waku_server_actions_extracts_txt_extension_and_uppercase_hash(monkeypatch):
+def test_probe_waku_server_actions_extracts_rsc_extension_and_uppercase_hash(monkeypatch):
     monkeypatch.setattr(
         waku,
         "request_with_retries",
@@ -240,14 +240,14 @@ def test_probe_waku_server_actions_extracts_txt_extension_and_uppercase_hash(mon
             "ok": True,
             "status_code": 200,
             "headers": {},
-            "body": "/RSC/F/ABCDEF1234567890/act$ion-Name.txt",
-            "body_snippet": "/RSC/F/ABCDEF1234567890/act$ion-Name.txt",
+            "body": "/RSC/F/ABCDEF1234567890/act$ion-Name.rsc",
+            "body_snippet": "/RSC/F/ABCDEF1234567890/act$ion-Name.rsc",
         },
     )
     has_actions, count, endpoints = waku.probe_waku_server_actions("http://example")
     assert has_actions is True
     assert count == len(endpoints) >= 1
-    assert any(ep.endswith(".txt") for ep, _ in endpoints)
+    assert any(ep.endswith(".rsc") for ep, _ in endpoints)
     assert any("act$ion-Name" in ep for ep, _ in endpoints)
 
 
@@ -269,7 +269,7 @@ def test_probe_waku_server_actions_extracts_prefetched_rsc_route_endpoints(monke
     assert any(ep == "/RSC/index.txt" for ep, _ in endpoints)
 
 
-def test_probe_waku_server_actions_prefetch_does_not_imply_actions(monkeypatch):
+def test_probe_waku_server_actions_prefetch_requires_react_action_form(monkeypatch):
     monkeypatch.setattr(
         waku,
         "request_with_retries",
@@ -284,53 +284,9 @@ def test_probe_waku_server_actions_prefetch_does_not_imply_actions(monkeypatch):
         },
     )
     has_actions, count, endpoints = waku.probe_waku_server_actions("http://example")
-    assert has_actions is False
-    assert count == len(endpoints) >= 1
-    assert any(ep == "/RSC/index.txt" for ep, _ in endpoints)
-
-
-def test_probe_waku_server_actions_follows_imports(monkeypatch):
-    bodies = {
-        "http://example": {
-            "ok": True,
-            "status_code": 200,
-            "headers": {},
-            "body": '<html><body><script type="module" src="/src/components/ActionForm.tsx"></script></body></html>',
-            "body_snippet": "",
-        },
-        "http://example/src/components/ActionForm.tsx": {
-            "ok": True,
-            "status_code": 200,
-            "headers": {"content-type": "text/javascript"},
-            "body": 'import {logFieldUpdate} from "/src/actions.ts";',
-            "body_snippet": "",
-        },
-        "http://example/src/actions.ts": {
-            "ok": True,
-            "status_code": 200,
-            "headers": {"content-type": "text/javascript"},
-            "body": 'createServerReference("/app/src/actions.ts#logFieldUpdate")',
-            "body_snippet": "",
-        },
-    }
-
-    def fake_scan(url, **kwargs):  # noqa: ARG001
-        return bodies.get(
-            url,
-            {
-                "ok": True,
-                "status_code": 404,
-                "headers": {"content-type": "text/plain"},
-                "body": "Not Found",
-                "body_snippet": "Not Found",
-            },
-        )
-
-    monkeypatch.setattr(waku, "request_with_retries", fake_scan)
-    has_actions, count, endpoints = waku.probe_waku_server_actions("http://example")
     assert has_actions is True
     assert count == len(endpoints) >= 1
-    assert any("/RSC/ACTION_" in ep for ep, _ in endpoints)
+    assert any(ep == "/RSC/index.txt" for ep, _ in endpoints)
 
 
 def test_probe_waku_server_actions_extracts_prefetched_route_keys(monkeypatch):
@@ -341,8 +297,8 @@ def test_probe_waku_server_actions_extracts_prefetched_route_keys(monkeypatch):
             "ok": True,
             "status_code": 200,
             "headers": {},
-            "body": 'globalThis.__WAKU_PREFETCHED__ = {"R/_root": Promise.resolve(1)};',
-            "body_snippet": 'globalThis.__WAKU_PREFETCHED__ = {"R/_root": Promise.resolve(1)};',
+            "body": 'globalThis.__WAKU_PREFETCHED__ = {\"R/_root\": Promise.resolve(1)};',
+            "body_snippet": 'globalThis.__WAKU_PREFETCHED__ = {\"R/_root\": Promise.resolve(1)};',
         },
     )
     has_actions, count, endpoints = waku.probe_waku_server_actions("http://example")

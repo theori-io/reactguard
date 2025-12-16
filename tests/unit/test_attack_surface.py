@@ -1,19 +1,26 @@
 from reactguard.framework_detection.keys import (
     SIG_DETECTION_CONFIDENCE_LEVEL,
+    SIG_REACT_BUNDLE_ONLY,
     SIG_SERVER_ACTIONS_CONFIDENCE,
     SIG_SERVER_ACTIONS_ENABLED,
     TAG_NEXTJS,
     TAG_NEXTJS_PAGES_ROUTER,
+    TAG_REACT_ROUTER_V7,
+    TAG_REACT_STREAMING,
     TAG_RSC,
     TAG_WAKU,
 )
 from reactguard.models import FrameworkDetectionResult
 from reactguard.models.poc import PocStatus
+from reactguard.utils.context import scan_context
 from reactguard.vulnerability_detection.cves import (
     CVE202555182VulnerabilityDetector,
+    CVE202555184VulnerabilityDetector,
 )
 from reactguard.vulnerability_detection.snapshots import DetectionSnapshot
 from reactguard.vulnerability_detection.surface import (
+    ENTRYPOINT_EXPECTED_NOT_FOUND_REASON_CODE,
+    ENTRYPOINT_NOT_FOUND_REASON_CODE,
     MISSING_SURFACE_REASON_CODE,
     build_missing_surface_report,
     compute_rsc_server_functions_surface,
@@ -108,6 +115,16 @@ def test_build_missing_surface_report_has_reason_code_and_attack_surface():
     assert "attack_surface" in report.details
 
 
+def test_dec2025_detector_returns_not_vulnerable_when_surface_closed():
+    detection = FrameworkDetectionResult(
+        tags=[TAG_NEXTJS, TAG_NEXTJS_PAGES_ROUTER],
+        signals={SIG_DETECTION_CONFIDENCE_LEVEL: "high"},
+    )
+    result = CVE202555184VulnerabilityDetector().evaluate("http://example", detection_result=detection)
+    assert result.status == PocStatus.NOT_VULNERABLE
+    assert result.details["reason_code"] == MISSING_SURFACE_REASON_CODE
+
+
 def test_cve_55182_detector_returns_not_vulnerable_when_surface_closed():
     detection = FrameworkDetectionResult(
         tags=[TAG_NEXTJS, TAG_NEXTJS_PAGES_ROUTER],
@@ -116,6 +133,21 @@ def test_cve_55182_detector_returns_not_vulnerable_when_surface_closed():
     result = CVE202555182VulnerabilityDetector().evaluate("http://example", detection_result=detection)
     assert result.status == PocStatus.NOT_VULNERABLE
     assert result.details["reason_code"] == MISSING_SURFACE_REASON_CODE
+
+
+def test_rsc_dependency_only_short_circuits_dec2025_family():
+    detection = FrameworkDetectionResult(
+        tags=[TAG_REACT_ROUTER_V7, TAG_REACT_STREAMING],
+        signals={SIG_REACT_BUNDLE_ONLY: True, SIG_DETECTION_CONFIDENCE_LEVEL: "low"},
+    )
+    with scan_context(extra={}):
+        result_55182 = CVE202555182VulnerabilityDetector().evaluate("http://example", detection_result=detection)
+        assert result_55182.status == PocStatus.NOT_VULNERABLE
+        assert result_55182.details["reason_code"] == MISSING_SURFACE_REASON_CODE
+
+        result = CVE202555184VulnerabilityDetector().evaluate("http://example", detection_result=detection)
+        assert result.status == PocStatus.NOT_VULNERABLE
+        assert result.details["reason_code"] == MISSING_SURFACE_REASON_CODE
 
 
 def test_waku_entrypoint_missing_is_likely_not_vulnerable(monkeypatch):
@@ -131,8 +163,8 @@ def test_waku_entrypoint_missing_is_likely_not_vulnerable(monkeypatch):
     )
 
     result = CVE202555182VulnerabilityDetector().evaluate("http://example", detection_result=detection)
-    assert result.status == PocStatus.NOT_APPLICABLE
-    assert "endpoints" in str(result.details.get("reason") or "").lower()
+    assert result.status == PocStatus.INCONCLUSIVE
+    assert "entrypoint" in str(result.details.get("reason") or "").lower()
 
 
 def test_waku_entrypoint_missing_but_expected_is_inconclusive(monkeypatch):
@@ -152,5 +184,5 @@ def test_waku_entrypoint_missing_but_expected_is_inconclusive(monkeypatch):
     )
 
     result = CVE202555182VulnerabilityDetector().evaluate("http://example", detection_result=detection)
-    assert result.status == PocStatus.NOT_APPLICABLE
-    assert "endpoints" in str(result.details.get("reason") or "").lower()
+    assert result.status == PocStatus.INCONCLUSIVE
+    assert "entrypoint" in str(result.details.get("reason") or "").lower()
