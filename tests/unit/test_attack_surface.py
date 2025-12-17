@@ -149,6 +149,41 @@ def test_rsc_dependency_only_short_circuits_dec2025_family():
         assert result.details["reason_code"] == MISSING_SURFACE_REASON_CODE
 
 
+def test_55182_default_rule_marks_missing_surface_and_skips_dec2025(monkeypatch):
+    detection = FrameworkDetectionResult(
+        tags=[TAG_NEXTJS, TAG_REACT_STREAMING],
+        signals={SIG_DETECTION_CONFIDENCE_LEVEL: "low"},
+    )
+
+    monkeypatch.setattr(
+        "reactguard.vulnerability_detection.cves.cve_2025_55182.run_assessor_with_context",
+        lambda *_args, **_kwargs: {
+            "status": PocStatus.NOT_APPLICABLE,
+            "details": {
+                "cve_id": "CVE-2025-55182",
+                "confidence": "high",
+                "reason": "No RSC processing detected",
+                "decision_rule": "_default_rule",
+                "surface_detected": False,
+            },
+            "raw_data": {},
+        },
+    )
+    monkeypatch.setattr(
+        "reactguard.vulnerability_detection.cves._rsc_dec2025_base.run_assessor_with_context",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("Dec 2025 assessor should be skipped when surface is marked missing")),
+    )
+
+    with scan_context(extra={}):
+        result_55182 = CVE202555182VulnerabilityDetector().evaluate("http://example", detection_result=detection)
+        assert result_55182.status == PocStatus.NOT_VULNERABLE
+        assert result_55182.details["reason_code"] == MISSING_SURFACE_REASON_CODE
+
+        result_55184 = CVE202555184VulnerabilityDetector().evaluate("http://example", detection_result=detection)
+        assert result_55184.status == PocStatus.NOT_VULNERABLE
+        assert result_55184.details["reason_code"] == MISSING_SURFACE_REASON_CODE
+
+
 def test_waku_entrypoint_missing_is_likely_not_vulnerable(monkeypatch):
     detection = FrameworkDetectionResult(
         tags=[TAG_WAKU, TAG_RSC],
