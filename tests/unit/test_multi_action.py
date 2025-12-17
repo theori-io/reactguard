@@ -7,6 +7,84 @@ from reactguard.vulnerability_detection.journal import PocJournal, journal_conte
 
 
 class TestMultiActionInterpreter(unittest.TestCase):
+    def test_safe_args_strategy_match_marks_vulnerable(self):
+        probe_results = [
+            {
+                "action_id": "40aaaa",
+                "status_code": 500,
+                "body_snippet": '1:E{"digest":"deadbeef"}',
+                "headers": {"content-type": "text/x-component"},
+                "payload_meta": {"probe_strategy": "safe_args_bigint_length"},
+            },
+            {
+                "action_id": "40bbbb",
+                "status_code": 500,
+                "body_snippet": '1:E{"digest":"deadbeef"}',
+                "headers": {"content-type": "text/x-component"},
+                "payload_meta": {"probe_strategy": "safe_args_bigint_length"},
+            },
+        ]
+        control_results = [
+            {
+                "action_id": "40cccc",
+                "status_code": 500,
+                "body_snippet": '1:E{"digest":"deadbeef"}',
+                "headers": {"content-type": "text/x-component"},
+                "payload_meta": {"probe_strategy": "safe_args_bigint_length"},
+            }
+        ]
+
+        result = analyze_multi_action_results(
+            probe_results,
+            action_ids=["40aaaa", "40bbbb"],
+            is_rsc_framework=True,
+            server_actions_expected=True,
+            control_results=control_results,
+            react_major=19,
+        )
+
+        self.assertEqual(result["status"], PocStatus.VULNERABLE)
+        self.assertEqual(result["details"]["decision_rule"], "_rule_safe_args_no_invoke")
+
+    def test_safe_args_strategy_divergence_marks_likely_not_vulnerable(self):
+        probe_results = [
+            {
+                "action_id": "40aaaa",
+                "status_code": 500,
+                "body_snippet": '1:E{"digest":"proto1"}',
+                "headers": {"content-type": "text/x-component"},
+                "payload_meta": {"probe_strategy": "safe_args_bigint_length"},
+            },
+            {
+                "action_id": "40bbbb",
+                "status_code": 500,
+                "body_snippet": '1:E{"digest":"proto1"}',
+                "headers": {"content-type": "text/x-component"},
+                "payload_meta": {"probe_strategy": "safe_args_bigint_length"},
+            },
+        ]
+        control_results = [
+            {
+                "action_id": "40cccc",
+                "status_code": 500,
+                "body_snippet": '1:E{"digest":"ctrl1"}',
+                "headers": {"content-type": "text/x-component"},
+                "payload_meta": {"probe_strategy": "safe_args_bigint_length"},
+            }
+        ]
+
+        result = analyze_multi_action_results(
+            probe_results,
+            action_ids=["40aaaa", "40bbbb"],
+            is_rsc_framework=True,
+            server_actions_expected=True,
+            control_results=control_results,
+            react_major=19,
+        )
+
+        self.assertEqual(result["status"], PocStatus.LIKELY_NOT_VULNERABLE)
+        self.assertEqual(result["details"]["decision_rule"], "_rule_safe_args_no_invoke")
+
     def test_control_diverges_proto_digest_marks_vulnerable(self):
         """When control succeeds (200) but proto fails, this is deterministic divergent behavior - VULNERABLE."""
         probe_results = [
@@ -69,7 +147,7 @@ class TestMultiActionInterpreter(unittest.TestCase):
         self.assertEqual(result["status"], PocStatus.LIKELY_NOT_VULNERABLE)
         self.assertIn("distinct error digests", result["details"]["reason"].lower())
 
-    def test_action_validation_returns_inconclusive(self):
+    def test_action_validation_returns_likely_not_vulnerable(self):
         probe_results = [
             {
                 "action_id": "40aaaa",
@@ -85,7 +163,7 @@ class TestMultiActionInterpreter(unittest.TestCase):
             is_rsc_framework=True,
         )
 
-        self.assertEqual(result["status"], PocStatus.INCONCLUSIVE)
+        self.assertEqual(result["status"], PocStatus.LIKELY_NOT_VULNERABLE)
         self.assertIs(result["details"].get("decode_surface_reached"), False)
         self.assertIn("action validation", result["details"]["reason"].lower())
 

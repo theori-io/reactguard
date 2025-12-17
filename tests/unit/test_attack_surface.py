@@ -10,6 +10,7 @@ from reactguard.framework_detection.keys import (
     TAG_RSC,
     TAG_WAKU,
 )
+from reactguard.framework_detection.signals.waku import WakuServerActionsProbeResult
 from reactguard.models import FrameworkDetectionResult
 from reactguard.models.poc import PocStatus
 from reactguard.utils.context import scan_context
@@ -19,8 +20,6 @@ from reactguard.vulnerability_detection.cves import (
 )
 from reactguard.vulnerability_detection.snapshots import DetectionSnapshot
 from reactguard.vulnerability_detection.surface import (
-    ENTRYPOINT_EXPECTED_NOT_FOUND_REASON_CODE,
-    ENTRYPOINT_NOT_FOUND_REASON_CODE,
     MISSING_SURFACE_REASON_CODE,
     build_missing_surface_report,
     compute_rsc_server_functions_surface,
@@ -115,22 +114,22 @@ def test_build_missing_surface_report_has_reason_code_and_attack_surface():
     assert "attack_surface" in report.details
 
 
-def test_dec2025_detector_returns_not_vulnerable_when_surface_closed():
-    detection = FrameworkDetectionResult(
-        tags=[TAG_NEXTJS, TAG_NEXTJS_PAGES_ROUTER],
-        signals={SIG_DETECTION_CONFIDENCE_LEVEL: "high"},
-    )
-    result = CVE202555184VulnerabilityDetector().evaluate("http://example", detection_result=detection)
-    assert result.status == PocStatus.NOT_VULNERABLE
-    assert result.details["reason_code"] == MISSING_SURFACE_REASON_CODE
-
-
 def test_cve_55182_detector_returns_not_vulnerable_when_surface_closed():
     detection = FrameworkDetectionResult(
         tags=[TAG_NEXTJS, TAG_NEXTJS_PAGES_ROUTER],
         signals={SIG_DETECTION_CONFIDENCE_LEVEL: "high"},
     )
     result = CVE202555182VulnerabilityDetector().evaluate("http://example", detection_result=detection)
+    assert result.status == PocStatus.NOT_VULNERABLE
+    assert result.details["reason_code"] == MISSING_SURFACE_REASON_CODE
+
+
+def test_dec2025_detector_returns_not_vulnerable_when_surface_closed():
+    detection = FrameworkDetectionResult(
+        tags=[TAG_NEXTJS, TAG_NEXTJS_PAGES_ROUTER],
+        signals={SIG_DETECTION_CONFIDENCE_LEVEL: "high"},
+    )
+    result = CVE202555184VulnerabilityDetector().evaluate("http://example", detection_result=detection)
     assert result.status == PocStatus.NOT_VULNERABLE
     assert result.details["reason_code"] == MISSING_SURFACE_REASON_CODE
 
@@ -158,13 +157,13 @@ def test_waku_entrypoint_missing_is_likely_not_vulnerable(monkeypatch):
 
     monkeypatch.setattr("reactguard.vulnerability_detection.assessors.waku.crawl_same_origin_html", lambda *_args, **_kwargs: [])
     monkeypatch.setattr(
-        "reactguard.vulnerability_detection.assessors.waku.probe_waku_server_actions",
-        lambda *_args, **_kwargs: (False, 0, []),
+        "reactguard.vulnerability_detection.assessors.waku.probe_waku_server_actions_result",
+        lambda *_args, **_kwargs: WakuServerActionsProbeResult(has_actions=False, count=0, endpoints=[]),
     )
 
     result = CVE202555182VulnerabilityDetector().evaluate("http://example", detection_result=detection)
-    assert result.status == PocStatus.INCONCLUSIVE
-    assert "entrypoint" in str(result.details.get("reason") or "").lower()
+    assert result.status == PocStatus.NOT_APPLICABLE
+    assert "endpoints" in str(result.details.get("reason") or "").lower()
 
 
 def test_waku_entrypoint_missing_but_expected_is_inconclusive(monkeypatch):
@@ -179,10 +178,10 @@ def test_waku_entrypoint_missing_but_expected_is_inconclusive(monkeypatch):
 
     monkeypatch.setattr("reactguard.vulnerability_detection.assessors.waku.crawl_same_origin_html", lambda *_args, **_kwargs: [])
     monkeypatch.setattr(
-        "reactguard.vulnerability_detection.assessors.waku.probe_waku_server_actions",
-        lambda *_args, **_kwargs: (False, 0, []),
+        "reactguard.vulnerability_detection.assessors.waku.probe_waku_server_actions_result",
+        lambda *_args, **_kwargs: WakuServerActionsProbeResult(has_actions=False, count=0, endpoints=[]),
     )
 
     result = CVE202555182VulnerabilityDetector().evaluate("http://example", detection_result=detection)
-    assert result.status == PocStatus.INCONCLUSIVE
-    assert "entrypoint" in str(result.details.get("reason") or "").lower()
+    assert result.status == PocStatus.NOT_APPLICABLE
+    assert "endpoints" in str(result.details.get("reason") or "").lower()

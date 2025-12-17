@@ -19,8 +19,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """Waku framework detector."""
 
 from typing import Any
-from urllib.parse import urljoin
 
+from ...http.url import build_endpoint_candidates
 from ...utils import TagSet
 from ..base import DetectionContext, FrameworkDetector
 from ..constants import (
@@ -35,7 +35,7 @@ from ..keys import SIG_RSC_ENDPOINT_FOUND, SIG_SERVER_ACTION_ENDPOINTS, SIG_SERV
 from ..signals.waku import (
     probe_waku_minimal_html,
     probe_waku_rsc_surface,
-    probe_waku_server_actions,
+    probe_waku_server_actions_result,
 )
 
 
@@ -98,17 +98,17 @@ class WakuDetector(FrameworkDetector):
                 has_rsc_surface = True
 
         if is_waku and context.url:
-            action_probe = probe_waku_server_actions(
-                context.url,
-            )
-            if isinstance(action_probe, tuple):
-                has_actions = bool(action_probe[0])
-                action_count = action_probe[1] if len(action_probe) > 1 else 0
-                if len(action_probe) >= 3 and isinstance(action_probe[2], list):
-                    endpoints_list = [urljoin(context.url, ep[0]) if context.url else ep[0] for ep in action_probe[2]]
-            else:
-                has_actions = bool(action_probe)
-                action_count = 0
+            action_probe = probe_waku_server_actions_result(context.url)
+            has_actions = action_probe.has_actions
+            action_count = action_probe.count
+            if action_probe.endpoints:
+                endpoints_list = []
+                for endpoint_path, _action_name in action_probe.endpoints:
+                    if not context.url:
+                        continue
+                    for candidate in build_endpoint_candidates(context.url, endpoint_path):
+                        if candidate not in endpoints_list:
+                            endpoints_list.append(candidate)
 
             if has_actions:
                 signals[SIG_SERVER_ACTIONS_ENABLED] = True

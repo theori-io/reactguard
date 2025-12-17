@@ -26,19 +26,19 @@ from typing import Any
 from ..http import (
     HttpRequest,
     create_default_http_client,
+    get_http_client,
     send_with_retries,
 )
 from ..http.client import HttpClient
 from ..models import FrameworkDetectionResult, ScanRequest
 from ..utils import TagSet, extract_versions
-from ..utils.context import scan_context
+from ..utils.context import get_scan_context, scan_context
 from .base import DetectionContext
 from .keys import (
     SIG_DETECTION_CONFIDENCE,
     SIG_DETECTION_CONFIDENCE_BREAKDOWN,
     SIG_DETECTION_CONFIDENCE_LEVEL,
     SIG_DETECTOR_ERRORS,
-    SIG_FETCH_ERROR_CATEGORY,
     SIG_FETCH_ERROR_MESSAGE,
     SIG_FINAL_URL,
     SIG_REACT_BUNDLE,
@@ -61,22 +61,32 @@ class FrameworkDetectionEngine:
         self.http_client = http_client or create_default_http_client()
 
     def detect(self, request: ScanRequest) -> FrameworkDetectionResult:
-        with scan_context(http_client=self.http_client, proxy_profile=request.proxy_profile, correlation_id=request.correlation_id):
-            response = request.response or self._fetch(request)
-            signals = self._initial_signals(response)
-            if response and response.url:
-                signals[SIG_FINAL_URL] = response.url
-            headers = self._normalize_headers(request, response)
-            body = self._resolve_body(request, response)
-            tags = TagSet()
-            context = self._build_context(request, response)
+        context = get_scan_context()
+        if context.http_client is None:
+            with scan_context(
+                http_client=self.http_client,
+                proxy_profile=request.proxy_profile,
+                correlation_id=request.correlation_id,
+            ):
+                return self._detect_ctx(request)
+        return self._detect_ctx(request)
 
-            signals.update(self._collect_version_signals(headers, body))
-            self._run_detectors(body, headers, tags, signals, context)
-            self._apply_confidence(signals)
-            self._apply_rsc_flags(tags, signals)
+    def _detect_ctx(self, request: ScanRequest) -> FrameworkDetectionResult:
+        response = request.response or self._fetch(request)
+        signals = self._initial_signals(response)
+        if response and response.url:
+            signals[SIG_FINAL_URL] = response.url
+        headers = self._normalize_headers(request, response)
+        body = self._resolve_body(request, response)
+        tags = TagSet()
+        context = self._build_context(request, response)
 
-            return FrameworkDetectionResult(tags=tags.to_list(), signals=signals)
+        signals.update(self._collect_version_signals(headers, body))
+        self._run_detectors(body, headers, tags, signals, context)
+        self._apply_confidence(signals)
+        self._apply_rsc_flags(tags, signals)
+
+        return FrameworkDetectionResult(tags=tags.to_list(), signals=signals)
 
     def _fetch(self, request: ScanRequest):
         if not request.url:
@@ -88,14 +98,14 @@ class FrameworkDetectionEngine:
             headers=request.request_headers,
             allow_redirects=True,
         )
-        response = send_with_retries(self.http_client, http_request)
+        response = send_with_retries(get_http_client(), http_request)
 
         if not response.ok:
             logger.debug(
                 "Initial fetch failed for %s: %s (%s)",
                 request.url,
                 response.error_message,
-                response.error_category,
+                response.error_type,
             )
         return response
 
@@ -103,7 +113,6 @@ class FrameworkDetectionEngine:
     def _initial_signals(response) -> dict[str, Any]:
         if response and not response.ok:
             return {
-                SIG_FETCH_ERROR_CATEGORY: response.error_category,
                 SIG_FETCH_ERROR_MESSAGE: response.error_message,
             }
         return {}
@@ -124,8 +133,8 @@ class FrameworkDetectionEngine:
 
     def _build_context(self, request: ScanRequest, response) -> DetectionContext:
         return DetectionContext(
-            url=request.url or (response.url if response else None),
-            http_client=self.http_client,
+            url=(response.url if response and response.url else request.url),
+            http_client=get_http_client(),
         )
 
     @staticmethod

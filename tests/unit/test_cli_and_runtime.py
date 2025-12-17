@@ -1,4 +1,4 @@
-from reactguard.cli.main import _pretty_print, build_parser
+from reactguard.cli.main import _cve_sort_key, _pretty_print, build_parser
 from reactguard.models import FrameworkDetectionResult, ScanReport, VulnerabilityReport
 from reactguard.models.poc import PocStatus
 from reactguard.runtime import ReactGuard
@@ -145,8 +145,13 @@ def test_cli_json_truncates_large_strings(capsys):
     assert "[truncated]" in output
 
 
+def test_cve_sort_key_parses_ids():
+    assert _cve_sort_key("CVE-2025-55182") == (2025, 55182, "CVE-2025-55182")
+    assert _cve_sort_key("not-a-cve")[0] == 9999
+
+
 def test_ignored_proxy_and_correlation_are_accepted():
-    detection_result = FrameworkDetectionResult(tags=[], signals={"fetch_error_category": "TIMEOUT"})
+    detection_result = FrameworkDetectionResult(tags=[], signals={"fetch_error_message": "TIMEOUT"})
 
     detector = CVE202555182VulnerabilityDetector()
     result = detector.evaluate(

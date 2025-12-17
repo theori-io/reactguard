@@ -32,7 +32,7 @@ from ..log import setup_logging
 from ..runtime import ReactGuard
 
 CLI_TEXT_TRUNCATION_BYTES = 4096
-_CVE_ID_RE = re.compile(r"^CVE-(?P<year>\\d{4})-(?P<number>\\d+)$")
+_CVE_ID_RE = re.compile(r"^CVE-(?P<year>\d{4})-(?P<number>\d+)$")
 _CVE_IMPACTS: dict[str, str] = {
     "CVE-2025-55182": "Remote Code Execution",
     "CVE-2025-55183": "Source Code Exposure",

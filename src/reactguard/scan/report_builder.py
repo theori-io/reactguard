@@ -30,12 +30,7 @@ def build_scan_report(
     vulnerability_result: VulnerabilityReport | dict[str, Any] | list[VulnerabilityReport] | list[dict[str, Any]],
 ) -> ScanReport:
     """Combine detection + vulnerability results into a single report."""
-    if isinstance(vulnerability_result, list):
-        vuln_reports = [v if isinstance(v, VulnerabilityReport) else VulnerabilityReport.from_mapping(v) for v in vulnerability_result]
-        return ScanReport.from_parts(detection_result, vuln_reports)
-
-    vuln_report = vulnerability_result if isinstance(vulnerability_result, VulnerabilityReport) else VulnerabilityReport.from_mapping(vulnerability_result)
-    return ScanReport.from_parts(detection_result, vuln_report)
+    return ScanReport.from_parts(detection_result, vulnerability_result)
 
 
 __all__ = ["build_scan_report"]

@@ -23,6 +23,7 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
+from .confidence import confidence_label, confidence_score
 from .version_thresholds import (
     NEXT_CANARY_SAFE_BUILD,
     NEXT_PATCHED_PATCH_BY_MINOR,
@@ -73,23 +74,6 @@ class ParsedVersion:
         return (self.major, self.minor, self.patch, self.suffix)
 
 
-_CONFIDENCE_ORDER = {"none": 0, "low": 1, "medium": 2, "high": 3}
-
-
-def _confidence_score(confidence: str | None) -> int:
-    return _CONFIDENCE_ORDER.get(str(confidence or "").lower(), 0)
-
-
-def _confidence_label(score: int) -> str:
-    if score >= _CONFIDENCE_ORDER["high"]:
-        return "high"
-    if score >= _CONFIDENCE_ORDER["medium"]:
-        return "medium"
-    if score > 0:
-        return "low"
-    return "none"
-
-
 def parse_semver(version: str | None) -> ParsedVersion | None:
     if not version:
         return None
@@ -119,8 +103,18 @@ def compare_semver(a: str | None, b: str | None) -> int | None:
 SEMVER_PATTERN = r"\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?"
 
 
+def _confidence_score(confidence: str | None) -> int:
+    """Backwards-compatible alias for confidence scoring."""
+    return confidence_score(confidence)
+
+
+def _confidence_label(score: int) -> str:
+    """Backwards-compatible alias for mapping scores to labels."""
+    return confidence_label(score)
+
+
 class VersionPatterns:
-    """Patterns curated from the lab containers for immutable version markers."""
+    """Patterns curated from observed builds for immutable version markers."""
 
     RSC_FLIGHT_IMPORT = re.compile(rf'\d+:I\["react-server-dom-(?:webpack|parcel|turbopack)"\s*,\s*"({SEMVER_PATTERN})"')
 
@@ -151,6 +145,13 @@ class VersionPatterns:
 
     REACT_ROUTER_VERSION = re.compile(r'__reactRouterVersion"?\s*[:=]\s*"(\d+\.\d+\.\d+)"')
 
+    # React bundles often assign the version onto the exported React object, e.g. `r.version="19.1.3"`.
+    # This is useful for frameworks (like React Router / Parcel) that don't embed `react@x.y.z` literals.
+    #
+    # NOTE: Some toolchains may embed unrelated React builds (e.g. Expo CLI vendored assets). Callers
+    # should validate/ignore matches based on surrounding context when possible.
+    REACT_VERSION_ASSIGN = re.compile(rf'\bversion\s*=\s*"({SEMVER_PATTERN})"')
+
 
 def extract_versions(headers: dict[str, str], body: str) -> dict[str, Any]:
     versions: dict[str, Any] = {}
@@ -159,8 +160,8 @@ def extract_versions(headers: dict[str, str], body: str) -> dict[str, Any]:
 
     def _maybe_set_version(key: str, value: str, source: str, confidence: str) -> None:
         """Set a version value with source/confidence, preferring stronger confidence."""
-        current_confidence = _confidence_score(versions.get(f"{key}_confidence"))
-        new_confidence = _confidence_score(confidence)
+        current_confidence = confidence_score(versions.get(f"{key}_confidence"))
+        new_confidence = confidence_score(confidence)
         if key not in versions or new_confidence > current_confidence:
             versions[key] = value
             versions[f"{key}_source"] = source
@@ -221,6 +222,43 @@ def extract_versions(headers: dict[str, str], body: str) -> dict[str, Any]:
         if plain_match:
             _maybe_set_version("react_version", plain_match.group(1), "plain_text", "low")
 
+    if "react_version" not in versions and ("react/jsx-runtime" in body or "react-dom" in body_lower or "react-server-dom" in body_lower or "react.dev/errors/" in body_lower):
+        # Fall back to the React.version string embedded in many bundled React builds.
+        #
+        # Guardrails:
+        # - Only consider React 18+/19+ (older versions aren't relevant to our RSC CVEs).
+        # - Ignore known Expo CLI vendored bundles that can embed unrelated canary builds.
+        best_candidate: str | None = None
+        best_rank: tuple[int, int, int, int] | None = None
+
+        for match in VersionPatterns.REACT_VERSION_ASSIGN.finditer(body):
+            candidate = match.group(1)
+            parsed = parse_semver(candidate)
+            if not parsed or parsed.major < 18:
+                continue
+
+            window = body[max(0, match.start() - 160) : min(len(body), match.end() + 160)].lower()
+            if "canary-full" in window or "node_modules/@expo/cli/static" in window or "@expo/cli/static" in window:
+                continue
+
+            suffix = str(parsed.suffix or "").lower()
+            if not suffix:
+                suffix_rank = 3
+            elif "canary" in suffix:
+                suffix_rank = 2
+            elif "rc" in suffix:
+                suffix_rank = 0
+            else:
+                suffix_rank = 1
+
+            rank = (suffix_rank, parsed.major, parsed.minor, parsed.patch)
+            if best_rank is None or rank > best_rank:
+                best_rank = rank
+                best_candidate = candidate
+
+        if best_candidate:
+            _maybe_set_version("react_version", best_candidate, "bundle_assign", "medium")
+
     if "next_version" not in versions:
         next_literal = VersionPatterns.NEXT_LITERAL.search(body)
         if next_literal:
@@ -268,6 +306,25 @@ def is_react_version_vulnerable(version: str | None) -> bool | None:
         return None
     if parsed.major != 19:
         return False
+
+    # Note: For CVE-2025-55182, the relevant version is the `react-server-dom-*` runtime that
+    # implements `decodeReply()` deserialization. In most deployments this tracks React's semver,
+    # and many code paths in this repo store that runtime version under the `react_version` key.
+
+    # React canary builds often include a date suffix, e.g.:
+    #   19.3.0-canary-06fcc8f3-20251009
+    # The canary date matters: builds released before 2025-12-03 predate the patch.
+    suffix = parsed.suffix or ""
+    if "canary" in suffix:
+        canary_date: int | None = None
+        for token in reversed(suffix.split("-")):
+            if len(token) == 8 and token.isdigit():
+                canary_date = int(token)
+                break
+        if canary_date is None:
+            # Conservative: unknown canary version => assume vulnerable.
+            return True
+        return canary_date < 20251203
 
     version_key = (parsed.major, parsed.minor, parsed.patch)
     if version_key in REACT_VULNERABLE_VERSIONS:

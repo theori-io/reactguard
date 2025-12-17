@@ -28,9 +28,19 @@ from ..constants import (
     RR_MANIFEST_PATTERN,
     RR_VERSION_PATTERN,
 )
-from ..keys import TAG_REACT_ROUTER_V5, TAG_REACT_ROUTER_V6, TAG_REACT_ROUTER_V7, TAG_REACT_ROUTER_V7_RSC, TAG_REACT_ROUTER_V7_SERVER_ACTIONS
-from ..signals.bundle import probe_js_bundles
-from ..signals.rsc import apply_rsc_probe_results
+from ..keys import (
+    SIG_RSC_ENDPOINT_FOUND,
+    SIG_SERVER_ACTION_ENDPOINTS,
+    SIG_SERVER_ACTIONS_CONFIDENCE,
+    SIG_SERVER_ACTIONS_ENABLED,
+    TAG_REACT_ROUTER_V5,
+    TAG_REACT_ROUTER_V6,
+    TAG_REACT_ROUTER_V7,
+    TAG_REACT_ROUTER_V7_RSC,
+    TAG_REACT_ROUTER_V7_SERVER_ACTIONS,
+)
+from ..signals.bundle import probe_js_bundles, promote_bundle_versions
+from ..signals.react_router_server_functions import discover_react_router_server_functions
 
 
 class ReactRouterDetector(FrameworkDetector):
@@ -89,22 +99,53 @@ class ReactRouterDetector(FrameworkDetector):
             except (ValueError, IndexError):
                 pass
 
-        if context.url and confidence != "high":
+        needs_bundle_versions = bool(
+            context.url and (signals.get("detected_react_version") is None or signals.get("detected_react_major") is None or signals.get("detected_react_router_version") is None)
+        )
+
+        if context.url and (confidence != "high" or needs_bundle_versions):
             bundle_signals = probe_js_bundles(
                 context.url,
                 body,
             )
             signals.update(bundle_signals)
 
-            if bundle_signals.get("react_router_v7_bundle"):
-                detected_version = "v7"
-                confidence = "medium"
-            elif bundle_signals.get("react_router_v6_bundle"):
-                detected_version = "v6"
-                confidence = "medium"
-            elif bundle_signals.get("react_router_v5_bundle"):
-                detected_version = "v5"
-                confidence = "medium"
+            promote_bundle_versions(
+                signals,
+                bundle_signals,
+                keys=("react_version", "react_major", "react_router_version", "rsc_runtime_version"),
+            )
+
+            if confidence != "high":
+                if bundle_signals.get("react_router_v7_bundle"):
+                    detected_version = "v7"
+                    confidence = "medium"
+                elif bundle_signals.get("react_router_v6_bundle"):
+                    detected_version = "v6"
+                    confidence = "medium"
+                elif bundle_signals.get("react_router_v5_bundle"):
+                    detected_version = "v5"
+                    confidence = "medium"
+
+        # React Router Server Functions are v7-only. When present, action IDs are embedded in HTML
+        # as `$ACTION_ID_<id>` hidden inputs, which is a strong v7 signal even when bundle-based
+        # heuristics misclassify the major.
+        if context.url and signals.get(SIG_SERVER_ACTIONS_ENABLED) is None:
+            should_try_actions = detected_version == "v7" or "$ACTION_ID_" in body
+            if should_try_actions:
+                discovery = discover_react_router_server_functions(body, context.url)
+                if discovery.action_ids:
+                    detected_version = "v7"
+                    confidence = "high"
+                    tags.add(TAG_REACT_ROUTER_V7_RSC)
+                    tags.add(TAG_REACT_ROUTER_V7_SERVER_ACTIONS)
+                    signals[SIG_RSC_ENDPOINT_FOUND] = True
+                    signals[SIG_SERVER_ACTIONS_ENABLED] = True
+                    signals[SIG_SERVER_ACTIONS_CONFIDENCE] = "medium"
+                    signals["react_router_server_action_ids"] = list(discovery.action_ids)
+                    if discovery.action_endpoints:
+                        signals[SIG_SERVER_ACTION_ENDPOINTS] = list(discovery.action_endpoints)
+                        signals[SIG_SERVER_ACTIONS_CONFIDENCE] = "high"
 
         if detected_version == "v7":
             tags.add(TAG_REACT_ROUTER_V7)
@@ -118,12 +159,3 @@ class ReactRouterDetector(FrameworkDetector):
 
         if detected_version:
             signals["react_router_confidence"] = confidence
-
-        if detected_version == "v7" and context.url:
-            apply_rsc_probe_results(
-                context.url,
-                tags=tags,
-                signals=signals,
-                rsc_tag=TAG_REACT_ROUTER_V7_RSC,
-                server_actions_tag=TAG_REACT_ROUTER_V7_SERVER_ACTIONS,
-            )

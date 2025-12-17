@@ -62,9 +62,18 @@ WAKU_RSC_CALL_PATTERN = re.compile(r"__waku_rsc_call_server|__waku_ssr_handler")
 WAKU_META_GENERATOR_PATTERN = re.compile(r'<meta[^>]+name=["\']generator["\'][^>]+content=["\']Waku["\']', re.IGNORECASE)
 WAKU_MODULE_CACHE_PATTERN = re.compile(r"__waku_module_cache__")
 WAKU_WEBPACK_CHUNK_PATTERN = re.compile(r"globalThis\.__webpack_chunk_load__")
-WAKU_RSC_ENDPOINT_PATTERN = re.compile(r"/RSC/F/([a-f0-9]{8,64})/([\w$-]+)\.(txt|rsc)", re.IGNORECASE)
-WAKU_RSC_DEV_ENDPOINT_PATTERN = re.compile(r"/RSC/F/_/([^\"']+)/([\w$-]+)\.(txt|rsc)", re.IGNORECASE)
-WAKU_RSC_PREFETCH_KEY_PATTERN = re.compile(r'["\'](/RSC/[^"\']+\.(?:txt|rsc))["\']\s*:', re.IGNORECASE)
+# Waku server-action endpoints are commonly `.txt` (e.g., `/RSC/F/<hash>/<action>.txt`).
+# While `/RSC/index.rsc` exists on some Waku targets as an alternate "index" endpoint, we keep `.rsc` out of
+# server-action endpoint extraction to avoid speculative expansions.
+WAKU_RSC_ENDPOINT_PATTERN = re.compile(r"/RSC/F/([a-f0-9]{8,64})/([\w$-]+)\.txt", re.IGNORECASE)
+WAKU_RSC_DEV_ENDPOINT_PATTERN = re.compile(r"/RSC/F/_/([^\"']+)/([\w$-]+)\.txt", re.IGNORECASE)
+# Accept both hashed (`/RSC/F/<hash>/<action>.txt`), dev (`/RSC/F/_/<file>/<action>.txt`) and ActionId routes
+# (`/RSC/ACTION_<file>/<action>.txt`).
+WAKU_SERVER_ACTION_ENDPOINT_PATTERN = re.compile(
+    r"/RSC/(?:F/[a-f0-9]{8,64}/[\w$-]+|F/_/[^\"']+/[\w$-]+|ACTION_[^\"']+/[\w$-]+)\.txt",
+    re.IGNORECASE,
+)
+WAKU_RSC_PREFETCH_KEY_PATTERN = re.compile(r'["\'](/RSC/[^"\']+\.txt)["\']\s*:', re.IGNORECASE)
 WAKU_RSC_PREFETCH_ROUTE_KEY_PATTERN = re.compile(r'["\'](R/[^"\']+)["\']\s*:', re.IGNORECASE)
 WAKU_ACTION_ID_PATTERN_V025 = re.compile(r"([a-f0-9]{8,64})#([\w$-]+)", re.IGNORECASE)
 WAKU_ACTION_ID_PATTERN_V021 = re.compile(r"@id/([^#]+)#([\w$-]+)")
@@ -73,7 +82,8 @@ WAKU_MINIMAL_HTML_PATTERN = re.compile(
     r'^<html><body><script>import\(["\'][^"\']+["\']\)</script></body></html>$',
     re.IGNORECASE,
 )
-WAKU_JS_FALLBACK_PATTERN = re.compile(r'/(?:assets|src)/[^"\']+\.(?:js|mjs|cjs|ts|tsx|jsx)')
+# Note: order matters here (`tsx` before `ts`, `jsx` before `js`) so we don't truncate matches like `.tsx` -> `.ts`.
+WAKU_JS_FALLBACK_PATTERN = re.compile(r'/(?:assets|src)/[^"\']+\.(?:tsx|ts|jsx|js|mjs|cjs)')
 WAKU_ACTION_LITERAL_PATTERN = re.compile(r'"([a-f0-9]{8,64})#([\w$-]+)"', re.IGNORECASE)
 WAKU_VITE_ACTION_VIRTUAL_PATH_PATTERN = re.compile(r'/@id/[^"\']*actions\.ts[^"\']*')
 

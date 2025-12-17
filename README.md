@@ -3,6 +3,7 @@
 React2Shell scanner powered by Xint.
 
 ReactGuard provides framework- and vulnerability-detection tooling for CVE-2025-55182 (React2Shell) across frameworks that support React Server Components.
+It also includes detectors for CVE-2025-55183, CVE-2025-55184, and CVE-2025-67779.
 
 ### Support status
 - Next.js 14-16 and Waku 0.17-0.27: primary, validated coverage.

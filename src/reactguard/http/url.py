@@ -23,6 +23,13 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 from urllib.parse import urljoin, urlparse
 
 
+def same_origin(a: str, b: str) -> bool:
+    """Return True when both URLs share the same scheme + netloc."""
+    pa = urlparse(str(a or ""))
+    pb = urlparse(str(b or ""))
+    return (pa.scheme, pa.netloc) == (pb.scheme, pb.netloc)
+
+
 def build_base_dir_url(base_url: str) -> str:
     """
     Convert a scan URL into a "directory" URL suitable for relative `urljoin()` calls.
@@ -58,5 +65,4 @@ def build_endpoint_candidates(base_url: str, path: str) -> list[str]:
     return [root_url, base_relative_url]
 
 
-__all__ = ["build_base_dir_url", "build_endpoint_candidates"]
-
+__all__ = ["build_base_dir_url", "build_endpoint_candidates", "same_origin"]

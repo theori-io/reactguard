@@ -29,14 +29,26 @@ from ..constants import (
     EXPO_ROUTER_PATTERN,
     EXPO_STATIC_WEB_PATTERN,
 )
-from ..keys import SIG_REACT_BUNDLE, SIG_REACT_DOM_BUNDLE, SIG_REACT_SERVER_DOM_BUNDLE, TAG_EXPO, TAG_EXPO_RSC, TAG_EXPO_SERVER_ACTIONS
-from ..signals.bundle import probe_js_bundles
-from ..signals.rsc import apply_rsc_probe_results
+from ..keys import (
+    SIG_REACT_BUNDLE,
+    SIG_REACT_DOM_BUNDLE,
+    SIG_REACT_SERVER_DOM_BUNDLE,
+    SIG_RSC_ENDPOINT_FOUND,
+    SIG_SERVER_ACTION_ENDPOINTS,
+    SIG_SERVER_ACTIONS_CONFIDENCE,
+    SIG_SERVER_ACTIONS_ENABLED,
+    TAG_EXPO,
+    TAG_EXPO_RSC,
+    TAG_EXPO_SERVER_ACTIONS,
+    TAG_RSC,
+)
+from ..signals.bundle import probe_js_bundles, promote_bundle_versions
+from ..signals.expo_server_functions import probe_expo_server_functions
 
 
 class ExpoDetector(FrameworkDetector):
     name = "expo"
-    produces_tags = [TAG_EXPO, TAG_EXPO_RSC, TAG_EXPO_SERVER_ACTIONS]
+    produces_tags = [TAG_EXPO, TAG_EXPO_RSC, TAG_EXPO_SERVER_ACTIONS, TAG_RSC]
     priority = 25
 
     def detect(
@@ -79,28 +91,38 @@ class ExpoDetector(FrameworkDetector):
             if bundle_signals.get(SIG_REACT_SERVER_DOM_BUNDLE):
                 signals[SIG_REACT_SERVER_DOM_BUNDLE] = True
 
+            promote_bundle_versions(
+                signals,
+                bundle_signals,
+                keys=("react_version", "react_major", "rsc_runtime_version"),
+            )
+
         bundle_hit = bundle_signals.get("expo_router")
         is_expo = bool(has_registry or has_hydrate or bundle_hit or has_router_pkg or has_static_assets or has_reset_style)
 
         if is_expo:
             tags.add(TAG_EXPO)
+            if context.url and signals.get(SIG_SERVER_ACTIONS_ENABLED) is None:
+                probe = probe_expo_server_functions(context.url)
 
-        if is_expo and context.url:
-            rsc_result = apply_rsc_probe_results(
-                context.url,
-                tags=tags,
-                signals=signals,
-                rsc_tag=TAG_EXPO_RSC,
-                server_actions_tag=TAG_EXPO_SERVER_ACTIONS,
-                server_actions_imply_rsc=True,
-                set_defaults=True,
-            )
+                if probe.has_rsc_surface:
+                    tags.add(TAG_EXPO_RSC)
+                    tags.add(TAG_RSC)
+                    signals[SIG_RSC_ENDPOINT_FOUND] = True
+                    signals["expo_flight_surface"] = True
 
-            if rsc_result["rsc_endpoint_found"] or rsc_result["server_actions_enabled"]:
-                signals["expo_rsc_experimental"] = True
-
-            if rsc_result["server_actions_enabled"]:
-                signals["expo_server_actions_experimental"] = True
+                if probe.server_action_endpoints:
+                    tags.add(TAG_EXPO_SERVER_ACTIONS)
+                    signals[SIG_SERVER_ACTIONS_ENABLED] = True
+                    signals[SIG_SERVER_ACTION_ENDPOINTS] = list(probe.server_action_endpoints)
+                    signals.setdefault(SIG_SERVER_ACTIONS_CONFIDENCE, "medium")
+                else:
+                    # We have an Expo Router surface but did not discover a concrete action endpoint.
+                    # Treat this as "unknown" rather than a confident negative.
+                    signals.setdefault(SIG_SERVER_ACTIONS_ENABLED, None)
+                    signals.setdefault(SIG_SERVER_ACTIONS_CONFIDENCE, "none")
+                if probe.evidence:
+                    signals["expo_rsc_evidence"] = dict(probe.evidence)
 
     def should_skip(self, tags: TagSet) -> bool:
         return TAG_EXPO in tags

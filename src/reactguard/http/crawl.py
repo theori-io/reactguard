@@ -27,7 +27,6 @@ from typing import Any
 from urllib.parse import urljoin, urlparse
 
 from ..config import load_http_settings
-from ..utils.context import get_scan_context
 from .models import HttpRequest, RetryConfig
 from .retry import send_with_retries
 from .utils import get_http_client
@@ -57,35 +56,32 @@ class _HrefParser(HTMLParser):
 
 def _scan_once(
     url: str,
-    *,
-    timeout: float | None,
-    http_client=None,
 ) -> dict[str, Any]:
     settings = load_http_settings()
-    context = get_scan_context()
-    client = http_client or context.http_client or get_http_client()
-    effective_timeout = timeout if timeout is not None else (context.timeout if context.timeout is not None else settings.timeout)
+    client = get_http_client()
 
     request = HttpRequest(
         url=url,
         method="GET",
         headers={"Accept": "text/html, */*", "User-Agent": settings.user_agent},
-        timeout=effective_timeout,
+        timeout=None,
         allow_redirects=True,
     )
     response = send_with_retries(client, request, retry_config=RetryConfig(max_attempts=1))
 
-    return {
+    result: dict[str, Any] = {
         "ok": response.ok,
         "status_code": response.status_code,
         "headers": response.headers,
         "body": response.text,
         "body_snippet": response.body_snippet,
         "url": response.url or url,
-        "error_category": response.error_category,
         "error_message": response.error_message,
         "error_type": response.error_type,
     }
+    if result.get("ok") is False and result.get("error_message") and result.get("error") is None:
+        result["error"] = result["error_message"]
+    return result
 
 
 def _looks_like_html(resp: dict[str, Any]) -> bool:
@@ -109,21 +105,26 @@ def crawl_same_origin_html(
     *,
     max_pages: int = 6,
     max_depth: int = 2,
-    timeout: float | None = 4.0,
-    http_client=None,
+    follow_links: bool = False,
 ) -> list[CrawledPage]:
     """
-    Crawl same-origin HTML pages with strict limits.
+    Fetch same-origin HTML pages with strict limits.
 
     Safety properties:
     - GET-only requests
     - same-origin only
     - bounded by max_pages/max_depth
+    - does not follow `<a href>` links by default
+
+    Notes:
+    - We follow the initial HTTP redirect chain (if any) and then enforce same-origin relative to the
+      landing page. This supports common www/https redirects without broadening crawl scope.
     """
     if not start_url:
         return []
 
     start_norm = str(start_url)
+    start_origin_url = start_norm
     visited: set[str] = set()
     out: list[CrawledPage] = []
 
@@ -136,12 +137,14 @@ def crawl_same_origin_html(
             continue
         visited.add(url)
 
-        resp = _scan_once(url, timeout=timeout, http_client=http_client)
+        resp = _scan_once(url)
         final_url = str(resp.get("url") or url)
         if final_url and final_url != url:
+            if depth == 0 and url == start_norm:
+                start_origin_url = final_url
             if final_url in visited:
                 continue
-            if not _same_origin(start_norm, final_url):
+            if not _same_origin(start_origin_url, final_url):
                 continue
             visited.add(final_url)
             url = final_url
@@ -157,6 +160,8 @@ def crawl_same_origin_html(
         if depth >= max_depth:
             continue
         if not _looks_like_html(resp):
+            continue
+        if not follow_links:
             continue
 
         parser = _HrefParser()
@@ -178,7 +183,7 @@ def crawl_same_origin_html(
                 continue
 
             normalized = parsed._replace(fragment="").geturl()
-            if not _same_origin(start_norm, normalized):
+            if not _same_origin(start_origin_url, normalized):
                 continue
             if normalized in visited:
                 continue
@@ -188,4 +193,3 @@ def crawl_same_origin_html(
 
 
 __all__ = ["CrawledPage", "crawl_same_origin_html"]
-

@@ -24,7 +24,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 import httpx
 
 from ..config import HttpSettings, load_http_settings
-from ..errors import categorize_exception
+from ..utils.context import get_scan_context
 from .client import HttpClient
 from .models import HttpRequest, HttpResponse
 
@@ -49,12 +49,17 @@ class HttpxClient(HttpClient):
             if max_body_bytes <= 0:
                 max_body_bytes = 16 * 1024 * 1024
 
+            timeout = request.timeout
+            if timeout is None:
+                context_timeout = get_scan_context().timeout
+                timeout = context_timeout if context_timeout is not None else self.settings.timeout
+
             with self._client.stream(
                 request.method,
                 request.url,
                 headers=headers,
                 content=request.body,
-                timeout=request.timeout or self.settings.timeout,
+                timeout=timeout,
                 follow_redirects=request.allow_redirects,
             ) as resp:
                 content = bytearray()
@@ -92,10 +97,8 @@ class HttpxClient(HttpClient):
                 },
             )
         except Exception as exc:  # noqa: BLE001
-            category = categorize_exception(exc)
             return HttpResponse(
                 ok=False,
-                error_category=category.value,
                 error_message=str(exc),
                 error_type=type(exc).__name__,
             )

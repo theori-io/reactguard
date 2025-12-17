@@ -4,14 +4,25 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "reactguard"
-description = "ReactGuard: React2Shell (CVE-2025-55182) scanner with framework + vulnerability detection for RSC stacks."
+description = "ReactGuard: RSC security scanner for CVE-2025-55182/55183/55184/67779 with framework + vulnerability detection."
 readme = "README.md"
 requires-python = ">=3.10"
 license = { file = "LICENSE" }
 authors = [
   { name = "Theori Inc." }
 ]
-keywords = ["security", "react", "nextjs", "waku", "cve-2025-55182", "react2shell", "reactguard"]
+keywords = [
+  "security",
+  "react",
+  "nextjs",
+  "waku",
+  "cve-2025-55182",
+  "cve-2025-55183",
+  "cve-2025-55184",
+  "cve-2025-67779",
+  "react2shell",
+  "reactguard",
+]
 classifiers = [
   "Development Status :: 4 - Beta",
   "Intended Audience :: Developers",
@@ -25,6 +36,7 @@ classifiers = [
 ]
 dependencies = [
   "httpx>=0.28.1,<0.29",
+  "typing_extensions>=4.15.0",
 ]
 dynamic = ["version"]
 
@@ -36,7 +48,7 @@ dev = [
   "pre-commit==4.5.0",
   "pytest==9.0.2",
   "pytest-cov==7.0.0",
-  "pytest-xdist==3.6.1",
+  "pytest-xdist==3.8.0",
   "ruff==0.14.8",
 ]
 

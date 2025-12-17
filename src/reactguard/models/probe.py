@@ -38,6 +38,6 @@ class ProbeRequest:
 class ProbeResult:
     ok: bool
     response: HttpResponse | None = None
-    error_category: str | None = None
     error_message: str | None = None
+    error_type: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)

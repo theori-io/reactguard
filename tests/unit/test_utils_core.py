@@ -39,6 +39,10 @@ def test_semver_utils_and_version_flags():
     assert version.is_react_version_vulnerable("19.1.2") is False
     assert version.is_react_version_vulnerable("18.2.0") is False
     assert version.is_react_version_vulnerable(None) is None
+    assert version.is_react_version_vulnerable("19.3.0-canary-06fcc8f3-20251009") is True
+    assert version.is_react_version_vulnerable("19.3.0-canary-deadbeef-20251202") is True
+    assert version.is_react_version_vulnerable("19.3.0-canary-deadbeef-20251203") is False
+    assert version.is_react_version_vulnerable("19.3.0-canary") is True
 
     assert version.is_next_version_vulnerable("15.4.7") is True
     assert version.is_next_version_vulnerable("15.4.8") is False

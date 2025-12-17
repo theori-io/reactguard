@@ -26,7 +26,6 @@ objects are modeled with typed dataclasses for clarity.
 """
 
 from .config import HttpSettings, load_http_settings
-from .errors import ErrorCategory
 from .framework_detection import FrameworkDetectionEngine
 from .http import (
     HttpClient,
@@ -50,7 +49,6 @@ from .vulnerability_detection import (
 
 __all__ = [
     "CVE202555182VulnerabilityDetector",
-    "ErrorCategory",
     "FrameworkDetectionEngine",
     "HttpClient",
     "HttpRequest",

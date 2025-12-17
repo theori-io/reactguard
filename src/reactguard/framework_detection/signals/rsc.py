@@ -22,10 +22,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from ...http import request_with_retries
-from ...http.client import HttpClient
-from ...http.url import build_endpoint_candidates
 from ...utils import TagSet
-from ...utils.context import scan_context
 from ..constants import RSC_PROBE_FLIGHT_BODY_PATTERN
 from ..keys import SIG_RSC_ENDPOINT_FOUND, SIG_SERVER_ACTIONS_CONFIDENCE, SIG_SERVER_ACTIONS_ENABLED
 from .server_actions import probe_server_actions_support
@@ -45,16 +42,10 @@ class RscSignalApplier:
 
     def apply(
         self,
-        *,
-        http_client: HttpClient | None = None,
     ) -> dict[str, bool]:
         probe_result = {"rsc_endpoint_found": False, "server_actions_enabled": False}
         if self.base_url:
-            if http_client is not None:
-                with scan_context(http_client=http_client):
-                    probe_result = probe_rsc_and_actions(self.base_url)
-            else:
-                probe_result = probe_rsc_and_actions(self.base_url)
+            probe_result = probe_rsc_and_actions(self.base_url)
 
         rsc_found = bool(probe_result.get("rsc_endpoint_found"))
         actions_found = bool(probe_result.get("server_actions_enabled"))
@@ -78,38 +69,36 @@ class RscSignalApplier:
         return {"rsc_endpoint_found": rsc_found, "server_actions_enabled": actions_found}
 
 
-def _probe_rsc_endpoint_ctx(base_url: str) -> bool:
-    if not base_url:
+def _probe_rsc_endpoint_ctx(endpoint_url: str) -> bool:
+    """
+    Probe a specific URL and return True if it appears to serve RSC Flight responses.
+
+    Note: This intentionally does not guess framework endpoints (e.g. `/rsc`). Callers should
+    provide a concrete endpoint URL discovered via framework-native signals.
+    """
+    if not endpoint_url:
         return False
 
-    for rsc_url in build_endpoint_candidates(base_url, "/rsc"):
-        resp = request_with_retries(
-            rsc_url,
-        )
-        if not resp.get("ok") or resp.get("status_code") != 200:
-            continue
+    resp = request_with_retries(endpoint_url)
+    if not resp.get("ok") or resp.get("status_code") != 200:
+        return False
 
-        resp_headers = {k.lower(): v for k, v in (resp.get("headers") or {}).items()}
-        resp_body = (resp.get("body") or resp.get("body_snippet") or "").strip()
+    resp_headers = {k.lower(): v for k, v in (resp.get("headers") or {}).items()}
+    resp_body = (resp.get("body") or resp.get("body_snippet") or "").strip()
 
-        if resp_headers.get("content-type", "").startswith("text/x-component"):
-            return True
+    if resp_headers.get("content-type", "").startswith("text/x-component"):
+        return True
 
-        if resp_body and RSC_PROBE_FLIGHT_BODY_PATTERN.match(resp_body):
-            return True
+    if resp_body and RSC_PROBE_FLIGHT_BODY_PATTERN.match(resp_body):
+        return True
 
     return False
 
 
 def probe_rsc_endpoint(
-    base_url: str,
-    *,
-    http_client: HttpClient | None = None,
+    endpoint_url: str,
 ) -> bool:
-    if http_client is not None:
-        with scan_context(http_client=http_client):
-            return _probe_rsc_endpoint_ctx(base_url)
-    return _probe_rsc_endpoint_ctx(base_url)
+    return _probe_rsc_endpoint_ctx(endpoint_url)
 
 
 def _probe_server_actions_ctx(base_url: str) -> bool:
@@ -137,12 +126,7 @@ def _probe_server_actions_ctx(base_url: str) -> bool:
 
 def probe_server_actions(
     base_url: str,
-    *,
-    http_client: HttpClient | None = None,
 ) -> bool:
-    if http_client is not None:
-        with scan_context(http_client=http_client):
-            return _probe_server_actions_ctx(base_url)
     return _probe_server_actions_ctx(base_url)
 
 
@@ -155,12 +139,7 @@ def _probe_rsc_and_actions_ctx(base_url: str) -> dict[str, bool]:
 
 def probe_rsc_and_actions(
     base_url: str,
-    *,
-    http_client: HttpClient | None = None,
 ) -> dict[str, bool]:
-    if http_client is not None:
-        with scan_context(http_client=http_client):
-            return _probe_rsc_and_actions_ctx(base_url)
     return _probe_rsc_and_actions_ctx(base_url)
 
 
@@ -173,7 +152,6 @@ def apply_rsc_probe_results(
     server_actions_tag: str | None = None,
     server_actions_imply_rsc: bool = False,
     set_defaults: bool = False,
-    http_client: HttpClient | None = None,
 ) -> dict[str, bool]:
     """
     Run the generic RSC + server action probes and fold the results into tags/signals.
@@ -191,4 +169,4 @@ def apply_rsc_probe_results(
         server_actions_imply_rsc=server_actions_imply_rsc,
         set_defaults=set_defaults,
     )
-    return applier.apply(http_client=http_client)
+    return applier.apply()
