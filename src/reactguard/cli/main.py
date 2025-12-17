@@ -22,6 +22,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 import argparse
 import json
+import re
 import sys
 from typing import Any
 
@@ -29,6 +30,22 @@ from ..config import HttpSettings, load_http_settings
 from ..http import create_default_http_client
 from ..log import setup_logging
 from ..runtime import ReactGuard
+
+CLI_TEXT_TRUNCATION_BYTES = 4096
+_CVE_ID_RE = re.compile(r"^CVE-(?P<year>\d{4})-(?P<number>\d+)$")
+_CVE_IMPACTS: dict[str, str] = {
+    "CVE-2025-55182": "Remote Code Execution",
+    "CVE-2025-55183": "Source Code Exposure",
+    "CVE-2025-55184": "Denial of Service",
+    "CVE-2025-67779": "Denial of Service",
+}
+
+
+def _cve_sort_key(cve_id: str) -> tuple[int, int, str]:
+    match = _CVE_ID_RE.match(cve_id or "")
+    if not match:
+        return (9999, 99999999, cve_id or "")
+    return (int(match.group("year")), int(match.group("number")), cve_id)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -47,9 +64,58 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _truncate_text_bytes(text: str, max_bytes: int) -> str:
+    raw = text.encode("utf-8")
+    if len(raw) <= max_bytes:
+        return text
+    suffix = "...[truncated]"
+    suffix_bytes = suffix.encode("utf-8")
+    keep = max_bytes - len(suffix_bytes)
+    if keep <= 0:
+        return suffix_bytes[:max_bytes].decode("utf-8", errors="ignore")
+    prefix = raw[:keep].decode("utf-8", errors="ignore")
+    return prefix + suffix
+
+
+def _truncate_for_cli(value: Any, *, max_bytes: int, _stack: set[int] | None = None) -> Any:
+    """
+    Truncate large strings in JSON output while protecting against true reference cycles.
+
+    Note: We track only the *current* recursion stack (not all visited objects) so repeated references
+    don't get mislabeled as circular.
+    """
+    if _stack is None:
+        _stack = set()
+
+    if isinstance(value, str):
+        return _truncate_text_bytes(value, max_bytes)
+
+    if isinstance(value, dict):
+        obj_id = id(value)
+        if obj_id in _stack:
+            return "<circular>"
+        _stack.add(obj_id)
+        try:
+            return {k: _truncate_for_cli(v, max_bytes=max_bytes, _stack=_stack) for k, v in value.items()}
+        finally:
+            _stack.discard(obj_id)
+
+    if isinstance(value, list):
+        obj_id = id(value)
+        if obj_id in _stack:
+            return ["<circular>"]
+        _stack.add(obj_id)
+        try:
+            return [_truncate_for_cli(v, max_bytes=max_bytes, _stack=_stack) for v in value]
+        finally:
+            _stack.discard(obj_id)
+
+    return value
+
+
 def _print_json(data: dict[str, Any] | Any) -> None:
     payload = data.to_dict() if hasattr(data, "to_dict") else data
-    json.dump(payload, sys.stdout, indent=2, sort_keys=True)
+    json.dump(_truncate_for_cli(payload, max_bytes=CLI_TEXT_TRUNCATION_BYTES), sys.stdout, indent=2, sort_keys=True)
     sys.stdout.write("\n")
 
 
@@ -72,6 +138,29 @@ def _pretty_print(report: dict[str, Any] | Any) -> None:
     print(f"Framework tags: {', '.join(tags) if tags else '-'}")
     if true_signals:
         print(f"Signals ({len(true_signals)}): {', '.join(true_signals)}")
+    vuln_list = report_dict.get("vulnerability_detections")
+    if isinstance(vuln_list, list) and vuln_list:
+        print("Findings:")
+        for item in sorted(
+            (v for v in vuln_list if isinstance(v, dict)),
+            key=lambda v: _cve_sort_key(str((v.get("details") or {}).get("cve_id") or "")),
+        ):
+            if not isinstance(item, dict):
+                continue
+            item_status = item.get("status")
+            item_details = item.get("details", {}) or {}
+            cve_id = item_details.get("cve_id") or "unknown"
+            impact = _CVE_IMPACTS.get(str(cve_id))
+            impact_suffix = f" ({impact})" if impact else ""
+            reason = item_details.get("reason") or ""
+            confidence = item_details.get("confidence") or ""
+            suffix = f" ({confidence})" if confidence else ""
+            if reason:
+                print(f"- {cve_id}{impact_suffix}: {item_status}{suffix} — {reason}")
+            else:
+                print(f"- {cve_id}{impact_suffix}: {item_status}{suffix}")
+        return
+
     reason = details.get("reason") or vuln.get("reason")
     confidence = details.get("confidence") or vuln.get("confidence")
     if reason:

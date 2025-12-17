@@ -23,7 +23,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 from dataclasses import dataclass, field
 from typing import Any
 
-from .http import HttpResponse
+from ..http.models import HttpResponse
 
 
 @dataclass
@@ -31,8 +31,7 @@ class ScanRequest:
     """
     Represents a scan request spanning framework detection plus vulnerability detection.
 
-    Either `url` or a pre-fetched `response` must be supplied. Proxy and correlation
-    metadata propagate through to all probes.
+    Either `url` or a pre-fetched `response` must be supplied.
 
     - `request_headers` are sent with outbound HTTP requests.
     - `response_headers` are optional headers to use for detection when a response
@@ -42,12 +41,12 @@ class ScanRequest:
 
     url: str | None = None
     response: HttpResponse | None = None
-    proxy_profile: str | None = None
-    correlation_id: str | None = None
     body: str | None = None
     request_headers: dict[str, str] | None = None
     response_headers: dict[str, str] | None = None
     headers: dict[str, str] | None = None
+    proxy_profile: str | None = None
+    correlation_id: str | None = None
 
     def __post_init__(self) -> None:
         # Backwards-compatible mapping for legacy callers that still pass `headers=`.

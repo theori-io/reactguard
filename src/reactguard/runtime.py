@@ -30,9 +30,9 @@ from .models import (
     ScanRequest,
     VulnerabilityReport,
 )
-from .scan.runner import ScanRunner
+from .scan.engine import ScanEngine
 from .utils.context import scan_context
-from .vulnerability_detection.runner import VulnerabilityDetectionRunner
+from .vulnerability_detection.engine import VulnerabilityDetectionEngine
 
 
 class ReactGuard:
@@ -46,51 +46,53 @@ class ReactGuard:
     def __init__(self, http_client: HttpClient | None = None):
         self.http_client = http_client or create_default_http_client()
         self.detection_engine = FrameworkDetectionEngine(self.http_client)
-        self.vulnerability_runner = VulnerabilityDetectionRunner(self.detection_engine)
-        self.scan_runner = ScanRunner(self.detection_engine, self.vulnerability_runner)
+        self.vulnerability_engine = VulnerabilityDetectionEngine(self.detection_engine)
+        self.scan_engine = ScanEngine(self.detection_engine, self.vulnerability_engine)
 
     def detect(
         self,
         url: str,
         *,
-        proxy_profile: str | None = None,
-        correlation_id: str | None = None,
         request_headers: dict[str, str] | None = None,
         response_headers: dict[str, str] | None = None,
         headers: dict[str, str] | None = None,
         body: str | None = None,
+        proxy_profile: str | None = None,
+        correlation_id: str | None = None,
     ) -> FrameworkDetectionResult:
         if response_headers is None and headers is not None:
             response_headers = headers
         request = ScanRequest(
             url=url,
-            proxy_profile=proxy_profile,
-            correlation_id=correlation_id,
             request_headers=request_headers,
             response_headers=response_headers,
             body=body,
+            proxy_profile=proxy_profile,
+            correlation_id=correlation_id,
         )
-        with scan_context(proxy_profile=proxy_profile, correlation_id=correlation_id, http_client=self.http_client):
+        with scan_context(http_client=self.http_client, proxy_profile=proxy_profile, correlation_id=correlation_id):
             return self.detection_engine.detect(request)
 
-    def vuln(
+    def scan_vulnerabilities(
         self,
         url: str,
         *,
+        detection_result: FrameworkDetectionResult | None = None,
         proxy_profile: str | None = None,
         correlation_id: str | None = None,
-        detection_result: FrameworkDetectionResult | None = None,
-    ) -> VulnerabilityReport:
-        with scan_context(proxy_profile=proxy_profile, correlation_id=correlation_id, http_client=self.http_client):
-            result = self.vulnerability_runner.run(
+    ) -> list[VulnerabilityReport]:
+        with scan_context(http_client=self.http_client, proxy_profile=proxy_profile, correlation_id=correlation_id):
+            result = self.vulnerability_engine.run(
                 url,
+                detection_result=detection_result,
                 proxy_profile=proxy_profile,
                 correlation_id=correlation_id,
-                detection_result=detection_result,
             )
+        if isinstance(result, list):
+            return [r if isinstance(r, VulnerabilityReport) else VulnerabilityReport.from_mapping(r) for r in result]
         if isinstance(result, VulnerabilityReport):
-            return result
-        return VulnerabilityReport.from_mapping(result)
+            return [result]
+        return [VulnerabilityReport.from_mapping(result)]
 
     def scan(
         self,
@@ -100,8 +102,8 @@ class ReactGuard:
         correlation_id: str | None = None,
     ) -> ScanReport:
         request = ScanRequest(url=url, proxy_profile=proxy_profile, correlation_id=correlation_id)
-        with scan_context(proxy_profile=proxy_profile, correlation_id=correlation_id, http_client=self.http_client):
-            return self.scan_runner.run(request)
+        with scan_context(http_client=self.http_client, proxy_profile=proxy_profile, correlation_id=correlation_id):
+            return self.scan_engine.run(request)
 
     def close(self) -> None:
         with suppress(Exception):
@@ -111,5 +113,5 @@ class ReactGuard:
     def __enter__(self) -> ReactGuard:
         return self
 
-    def __exit__(self, exc_type, exc, tb) -> None:  # noqa: ANN001
+    def __exit__(self, _exc_type, _exc, _tb) -> None:  # noqa: ANN001
         self.close()

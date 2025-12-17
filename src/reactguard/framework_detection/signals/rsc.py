@@ -20,13 +20,11 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 from dataclasses import dataclass
 from typing import Any
-from urllib.parse import urljoin
 
-from ...http import scan_with_retry
-from ...http.client import HttpClient
+from ...http import request_with_retries
 from ...utils import TagSet
-from ...utils.context import scan_context
 from ..constants import RSC_PROBE_FLIGHT_BODY_PATTERN
+from ..keys import SIG_RSC_ENDPOINT_FOUND, SIG_SERVER_ACTIONS_CONFIDENCE, SIG_SERVER_ACTIONS_ENABLED
 from .server_actions import probe_server_actions_support
 
 
@@ -44,49 +42,44 @@ class RscSignalApplier:
 
     def apply(
         self,
-        *,
-        proxy_profile: str | None = None,
-        correlation_id: str | None = None,
-        http_client: HttpClient | None = None,
     ) -> dict[str, bool]:
         probe_result = {"rsc_endpoint_found": False, "server_actions_enabled": False}
         if self.base_url:
-            if proxy_profile is not None or correlation_id is not None or http_client is not None:
-                with scan_context(proxy_profile=proxy_profile, correlation_id=correlation_id, http_client=http_client):
-                    probe_result = probe_rsc_and_actions(self.base_url)
-            else:
-                probe_result = probe_rsc_and_actions(self.base_url)
+            probe_result = probe_rsc_and_actions(self.base_url)
 
         rsc_found = bool(probe_result.get("rsc_endpoint_found"))
         actions_found = bool(probe_result.get("server_actions_enabled"))
         promote_rsc = rsc_found or (self.server_actions_imply_rsc and actions_found)
 
         if promote_rsc:
-            self.signals["rsc_endpoint_found"] = True
+            self.signals[SIG_RSC_ENDPOINT_FOUND] = True
             if self.rsc_tag:
                 self.tags.add(self.rsc_tag)
         elif self.set_defaults:
-            self.signals.setdefault("rsc_endpoint_found", False)
+            self.signals.setdefault(SIG_RSC_ENDPOINT_FOUND, False)
 
         if actions_found:
-            self.signals["server_actions_enabled"] = True
+            self.signals[SIG_SERVER_ACTIONS_ENABLED] = True
             if self.server_actions_tag:
                 self.tags.add(self.server_actions_tag)
         elif self.set_defaults:
-            self.signals.setdefault("server_actions_enabled", None)
-            self.signals.setdefault("server_actions_confidence", "none")
+            self.signals.setdefault(SIG_SERVER_ACTIONS_ENABLED, None)
+            self.signals.setdefault(SIG_SERVER_ACTIONS_CONFIDENCE, "none")
 
         return {"rsc_endpoint_found": rsc_found, "server_actions_enabled": actions_found}
 
 
-def _probe_rsc_endpoint_ctx(base_url: str) -> bool:
-    if not base_url:
+def _probe_rsc_endpoint_ctx(endpoint_url: str) -> bool:
+    """
+    Probe a specific URL and return True if it appears to serve RSC Flight responses.
+
+    Note: This intentionally does not guess framework endpoints (e.g. `/rsc`). Callers should
+    provide a concrete endpoint URL discovered via framework-native signals.
+    """
+    if not endpoint_url:
         return False
 
-    rsc_url = urljoin(base_url, "/rsc")
-    resp = scan_with_retry(
-        rsc_url,
-    )
+    resp = request_with_retries(endpoint_url)
     if not resp.get("ok") or resp.get("status_code") != 200:
         return False
 
@@ -103,16 +96,9 @@ def _probe_rsc_endpoint_ctx(base_url: str) -> bool:
 
 
 def probe_rsc_endpoint(
-    base_url: str,
-    *,
-    proxy_profile: str | None = None,
-    correlation_id: str | None = None,
-    http_client: HttpClient | None = None,
+    endpoint_url: str,
 ) -> bool:
-    if proxy_profile is not None or correlation_id is not None or http_client is not None:
-        with scan_context(proxy_profile=proxy_profile, correlation_id=correlation_id, http_client=http_client):
-            return _probe_rsc_endpoint_ctx(base_url)
-    return _probe_rsc_endpoint_ctx(base_url)
+    return _probe_rsc_endpoint_ctx(endpoint_url)
 
 
 def _probe_server_actions_ctx(base_url: str) -> bool:
@@ -140,14 +126,7 @@ def _probe_server_actions_ctx(base_url: str) -> bool:
 
 def probe_server_actions(
     base_url: str,
-    *,
-    proxy_profile: str | None = None,
-    correlation_id: str | None = None,
-    http_client: HttpClient | None = None,
 ) -> bool:
-    if proxy_profile is not None or correlation_id is not None or http_client is not None:
-        with scan_context(proxy_profile=proxy_profile, correlation_id=correlation_id, http_client=http_client):
-            return _probe_server_actions_ctx(base_url)
     return _probe_server_actions_ctx(base_url)
 
 
@@ -160,14 +139,7 @@ def _probe_rsc_and_actions_ctx(base_url: str) -> dict[str, bool]:
 
 def probe_rsc_and_actions(
     base_url: str,
-    *,
-    proxy_profile: str | None = None,
-    correlation_id: str | None = None,
-    http_client: HttpClient | None = None,
 ) -> dict[str, bool]:
-    if proxy_profile is not None or correlation_id is not None or http_client is not None:
-        with scan_context(proxy_profile=proxy_profile, correlation_id=correlation_id, http_client=http_client):
-            return _probe_rsc_and_actions_ctx(base_url)
     return _probe_rsc_and_actions_ctx(base_url)
 
 
@@ -176,13 +148,10 @@ def apply_rsc_probe_results(
     *,
     tags: TagSet,
     signals: dict[str, Any],
-    proxy_profile: str | None = None,
-    correlation_id: str | None = None,
     rsc_tag: str | None = None,
     server_actions_tag: str | None = None,
     server_actions_imply_rsc: bool = False,
     set_defaults: bool = False,
-    http_client: HttpClient | None = None,
 ) -> dict[str, bool]:
     """
     Run the generic RSC + server action probes and fold the results into tags/signals.
@@ -200,4 +169,4 @@ def apply_rsc_probe_results(
         server_actions_imply_rsc=server_actions_imply_rsc,
         set_defaults=set_defaults,
     )
-    return applier.apply(proxy_profile=proxy_profile, correlation_id=correlation_id, http_client=http_client)
+    return applier.apply()

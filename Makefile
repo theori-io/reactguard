@@ -1,7 +1,7 @@
-.PHONY: install fmt lint typecheck test clean
+.PHONY: install fmt lint typecheck test test-integration clean
 
 install:
-	python -m pip install -e .[dev]
+	python3 -m pip install -e .[dev]
 
 fmt:
 	ruff check --fix .
@@ -15,6 +15,9 @@ typecheck:
 
 test:
 	pytest --ignore=tests/integration --ignore=tests/live --cov=reactguard --cov-report=term-missing
+
+test-integration:
+	pytest tests/integration --cov=reactguard --cov-report=term-missing
 
 clean:
 	rm -rf .pytest_cache .ruff_cache .mypy_cache

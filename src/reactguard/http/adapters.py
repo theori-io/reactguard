@@ -23,7 +23,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 from typing import Any
 
 from ..config import load_http_settings
-from ..errors import ErrorCategory
+from ..utils.context import get_scan_context
 from .client import HttpClient
 from .models import HttpRequest, HttpResponse
 
@@ -38,35 +38,44 @@ class WorkerHttpClientAdapter(HttpClient):
 
     def request(self, request: HttpRequest) -> HttpResponse:
         try:
+            context = get_scan_context()
             timeout = request.timeout
             if timeout is None:
-                timeout = load_http_settings().timeout
-            data = self._scanner_client.scan(
-                request.url,
-                method=request.method,
-                headers=request.headers,
-                body=request.body,
-                proxy_profile=request.proxy,
-                correlation_id=request.correlation_id,
-                timeout=timeout,
-                allow_redirects=request.allow_redirects,
-            )
-            return HttpResponse(
-                ok=bool(data.get("ok")),
-                status_code=data.get("status_code"),
-                headers=dict(data.get("headers") or {}),
-                text=data.get("body") or data.get("body_snippet") or "",
-                content=(data.get("body") or "").encode("utf-8"),
-                url=data.get("url") or request.url,
-                error_category=data.get("error_category"),
-                error_message=data.get("error_message"),
-                error_type=data.get("error_type"),
-                meta=data,
-            )
+                timeout = context.timeout if context.timeout is not None else load_http_settings().timeout
+            scan_kwargs: dict[str, Any] = {
+                "method": request.method,
+                "headers": request.headers,
+                "body": request.body,
+                "timeout": timeout,
+                "allow_redirects": request.allow_redirects,
+            }
+
+            optional_args: list[str] = []
+            if context.proxy_profile is not None:
+                scan_kwargs["proxy_profile"] = context.proxy_profile
+                optional_args.append("proxy_profile")
+            if context.correlation_id is not None:
+                scan_kwargs["correlation_id"] = context.correlation_id
+                optional_args.append("correlation_id")
+
+            try:
+                data = self._scanner_client.scan(request.url, **scan_kwargs)
+            except TypeError as exc:
+                if optional_args and "unexpected keyword argument" in str(exc):
+                    for key in optional_args:
+                        scan_kwargs.pop(key, None)
+                    data = self._scanner_client.scan(request.url, **scan_kwargs)
+                else:
+                    raise
+
+            normalized = dict(data or {})
+            normalized["url"] = normalized.get("url") or request.url
+            response = HttpResponse.from_mapping(normalized)
+            response.meta = dict(normalized)
+            return response
         except Exception as exc:  # noqa: BLE001
             return HttpResponse(
                 ok=False,
-                error_category=ErrorCategory.UNKNOWN_ERROR.value,
                 error_message=str(exc),
                 error_type=type(exc).__name__,
             )
@@ -86,7 +95,7 @@ class StubHttpClient(HttpClient):
         self.requests.append(request)
         if request.url in self._responses:
             return self._responses[request.url]
-        return HttpResponse(ok=False, status_code=None, error_category=ErrorCategory.UNKNOWN_ERROR.value)
+        return HttpResponse(ok=False, status_code=None, error_message="No stubbed response configured")
 
     def close(self) -> None:
         return None

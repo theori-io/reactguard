@@ -4,7 +4,7 @@ from __future__ import annotations
 Per-scan ambient context.
 
 This module provides a ContextVar-backed ScanContext that carries common scan
-plumbing (proxy profile, correlation id, timeout, http client). Helpers can
+plumbing (timeout, http client). Helpers can
 read from this context when explicit arguments are omitted.
 """
 
@@ -19,11 +19,11 @@ from ..http.client import HttpClient
 
 @dataclass(frozen=True)
 class ScanContext:
-    proxy_profile: str | None = None
-    correlation_id: str | None = None
     timeout: float | None = None
     http_client: HttpClient | None = None
     extra: dict[str, Any] | None = None
+    proxy_profile: str | None = None
+    correlation_id: str | None = None
 
 
 _current_scan_context: ContextVar[ScanContext | None] = ContextVar("reactguard_scan_context", default=None)

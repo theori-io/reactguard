@@ -22,7 +22,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
-from .detection import FrameworkDetectionResult
+from .scan import FrameworkDetectionResult
 
 
 class PocStatus(str, Enum):
@@ -37,9 +37,9 @@ class PocStatus(str, Enum):
 @dataclass
 class PocRequest:
     url: str
+    detection: FrameworkDetectionResult | None = None
     proxy_profile: str | None = None
     correlation_id: str | None = None
-    detection: FrameworkDetectionResult | None = None
 
 
 @dataclass

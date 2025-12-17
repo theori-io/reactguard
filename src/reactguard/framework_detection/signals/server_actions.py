@@ -20,18 +20,16 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 """Server Actions probing helpers (httpx-backed)."""
 
-import secrets
 from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urljoin
 
 from ...config import load_http_settings
-from ...errors import ErrorCategory
-from ...http import scan_with_retry
-from ...http.client import HttpClient
+from ...rsc.payloads import build_multipart_form_payload, build_plaintext_payload
+from ...rsc.send import send_rsc_request
+from ...rsc.types import RscRequestConfig
 from ...utils import TagSet
 from ...utils.actions import generate_action_id
-from ...utils.context import scan_context
 from ..constants import (
     FRAMEWORK_HTML_MARKERS,
     SERVER_ACTIONS_ACTION_KEYWORDS,
@@ -43,6 +41,7 @@ from ..constants import (
     SERVER_ACTIONS_RSC_FLIGHT_PATTERN,
     SERVER_ACTIONS_STRONG_ACTION_KEYWORDS,
 )
+from ..keys import SIG_SERVER_ACTIONS_CONFIDENCE, SIG_SERVER_ACTIONS_ENABLED
 
 
 @dataclass
@@ -69,26 +68,14 @@ class ServerActionsSignalApplier:
         probe_result: dict[str, Any] | None = None,
         *,
         html_marker_hint: bool = False,
-        proxy_profile: str | None = None,
-        correlation_id: str | None = None,
-        http_client: HttpClient | None = None,
     ) -> dict[str, Any]:
         if probe_result is None:
-            if proxy_profile is not None or correlation_id is not None or http_client is not None:
-                with scan_context(proxy_profile=proxy_profile, correlation_id=correlation_id, http_client=http_client):
-                    probe_result = _probe_server_actions_support_ctx(
-                        self.base_url or "",
-                        action_header=self.action_header,
-                        payload_style=self.payload_style,
-                        action_endpoints=self.action_endpoints,
-                    )
-            else:
-                probe_result = _probe_server_actions_support_ctx(
-                    self.base_url or "",
-                    action_header=self.action_header,
-                    payload_style=self.payload_style,
-                    action_endpoints=self.action_endpoints,
-                )
+            probe_result = _probe_server_actions_support_ctx(
+                self.base_url or "",
+                action_header=self.action_header,
+                payload_style=self.payload_style,
+                action_endpoints=self.action_endpoints,
+            )
 
         status = probe_result.get("status_code")
         has_framework_marker = bool(probe_result.get("has_framework_html_marker") or probe_result.get("has_next_marker") or html_marker_hint)
@@ -134,25 +121,25 @@ class ServerActionsSignalApplier:
             self.signals[self.vary_signal_key] = True
 
         if supported:
-            self.signals["server_actions_enabled"] = True
-            self.signals["server_actions_confidence"] = confidence
+            self.signals[SIG_SERVER_ACTIONS_ENABLED] = True
+            self.signals[SIG_SERVER_ACTIONS_CONFIDENCE] = confidence
             if self.server_actions_tag:
                 self.tags.add(self.server_actions_tag)
         elif status in (404, 405) and not action_not_found:
-            self.signals["server_actions_enabled"] = False
-            self.signals["server_actions_confidence"] = "high"
+            self.signals[SIG_SERVER_ACTIONS_ENABLED] = False
+            self.signals[SIG_SERVER_ACTIONS_CONFIDENCE] = "high"
         elif is_html and has_framework_marker:
-            self.signals["server_actions_enabled"] = False
-            self.signals["server_actions_confidence"] = "low"
+            self.signals[SIG_SERVER_ACTIONS_ENABLED] = False
+            self.signals[SIG_SERVER_ACTIONS_CONFIDENCE] = "low"
             if self.fallback_html_signal_key:
                 self.signals[self.fallback_html_signal_key] = True
         elif self.set_defaults:
-            self.signals.setdefault("server_actions_enabled", None)
-            self.signals.setdefault("server_actions_confidence", "none")
+            self.signals.setdefault(SIG_SERVER_ACTIONS_ENABLED, None)
+            self.signals.setdefault(SIG_SERVER_ACTIONS_CONFIDENCE, "none")
 
         return {
             "supported": supported,
-            "confidence": self.signals.get("server_actions_confidence"),
+            "confidence": self.signals.get(SIG_SERVER_ACTIONS_CONFIDENCE),
             "status_code": status,
             "probe_result": probe_result,
         }
@@ -173,46 +160,34 @@ def _probe_server_actions_support_ctx(
     if not base_url:
         return {
             "supported": False,
-            "error_category": ErrorCategory.UNKNOWN_ERROR.value,
             "error_message": "No base URL provided",
         }
 
-    def _build_boundary() -> str:
-        return f"----FormBoundary{secrets.token_hex(8)}"
+    request_config = RscRequestConfig(
+        method="POST",
+        base_headers={
+            "Accept": "text/x-component",
+            "User-Agent": _user_agent(),
+        },
+        action_id_header=action_header,
+    )
 
-    headers = {
-        action_header: action_id,
-        "Accept": "text/x-component",
-        "User-Agent": _user_agent(),
-    }
-
-    if payload_style == "multipart":
-        boundary = _build_boundary()
-        headers["Content-Type"] = f"multipart/form-data; boundary={boundary}"
-        body = "\r\n".join(
-            [
-                f"--{boundary}",
-                'Content-Disposition: form-data; name="0"',
-                "",
-                "[]",
-                f"--{boundary}--",
-                "",
-            ]
-        )
-    else:
-        headers["Content-Type"] = "text/plain;charset=UTF-8"
-        body = ""
+    payload = (
+        build_multipart_form_payload([("0", "[]")], meta={"probe_kind": "server_actions_support"})
+        if payload_style == "multipart"
+        else build_plaintext_payload("", meta={"probe_kind": "server_actions_support"})
+    )
 
     target_url = base_url
     if action_endpoints:
         preferred = action_endpoints[0]
         target_url = preferred if preferred.startswith("http") else urljoin(base_url, preferred)
 
-    resp = scan_with_retry(
+    resp = send_rsc_request(
         target_url,
-        method="POST",
-        headers=headers,
-        body=body,
+        request_config,
+        payload,
+        action_id=action_id,
     )
 
     headers_lower = {k.lower(): v for k, v in (resp.get("headers") or {}).items()}
@@ -289,8 +264,8 @@ def _probe_server_actions_support_ctx(
         "react_major_from_flight": react_major_from_flight,
         "body_snippet": resp.get("body_snippet", ""),
         "body": resp.get("body"),
-        "error_category": resp.get("error_category"),
         "error_message": resp.get("error_message"),
+        "error_type": resp.get("error_type"),
         "payload_style": payload_style,
         "ok": resp.get("ok", False),
         "probe_url": target_url,
@@ -303,26 +278,8 @@ def probe_server_actions_support(
     action_id: str = "probe",
     action_header: str = SERVER_ACTIONS_DEFAULT_ACTION_HEADER,
     payload_style: str = "plain",
-    proxy_profile: str | None = None,
-    correlation_id: str | None = None,
-    timeout: float | None = None,
-    http_client: HttpClient | None = None,
     action_endpoints: list[str] | None = None,
 ) -> dict[str, Any]:
-    if proxy_profile is not None or correlation_id is not None or timeout is not None or http_client is not None:
-        with scan_context(
-            proxy_profile=proxy_profile,
-            correlation_id=correlation_id,
-            timeout=timeout,
-            http_client=http_client,
-        ):
-            return _probe_server_actions_support_ctx(
-                base_url,
-                action_id=action_id,
-                action_header=action_header,
-                payload_style=payload_style,
-                action_endpoints=action_endpoints,
-            )
     return _probe_server_actions_support_ctx(
         base_url,
         action_id=action_id,
@@ -338,29 +295,21 @@ def _detect_server_actions_ctx(
     action_header: str = SERVER_ACTIONS_DEFAULT_ACTION_HEADER,
 ) -> dict[str, Any]:
     action_id = generate_action_id()
-    boundary = f"----FormBoundary{secrets.token_hex(8)}"
-    body = "\r\n".join(
-        [
-            f"--{boundary}",
-            'Content-Disposition: form-data; name="0"',
-            "",
-            "[]",
-            f"--{boundary}--",
-            "",
-        ]
-    )
-    headers = {
-        "Content-Type": f"multipart/form-data; boundary={boundary}",
-        action_header: action_id,
-        "Accept": "text/x-component",
-        "User-Agent": _user_agent(),
-    }
-
-    scan = scan_with_retry(
-        url,
+    request_config = RscRequestConfig(
         method="POST",
-        headers=headers,
-        body=body,
+        base_headers={
+            "Accept": "text/x-component",
+            "User-Agent": _user_agent(),
+        },
+        action_id_header=action_header,
+    )
+    payload = build_multipart_form_payload([("0", "[]")], meta={"probe_kind": "server_actions_detect"})
+
+    scan = send_rsc_request(
+        url,
+        request_config,
+        payload,
+        action_id=action_id,
     )
 
     if not scan.get("ok"):
@@ -368,7 +317,8 @@ def _detect_server_actions_ctx(
             "supported": False,
             "confidence": "none",
             "reason": scan.get("error_message", "Probe failed"),
-            "error_category": scan.get("error_category"),
+            "error_message": scan.get("error_message"),
+            "error_type": scan.get("error_type"),
         }
 
     status_code = scan.get("status_code", 0)
@@ -471,14 +421,8 @@ def _detect_server_actions_ctx(
 
 def detect_server_actions(
     url: str,
-    proxy_profile: str | None = None,
-    correlation_id: str | None = None,
     action_header: str = SERVER_ACTIONS_DEFAULT_ACTION_HEADER,
-    http_client: HttpClient | None = None,
 ) -> dict[str, Any]:
-    if proxy_profile is not None or correlation_id is not None or http_client is not None:
-        with scan_context(proxy_profile=proxy_profile, correlation_id=correlation_id, http_client=http_client):
-            return _detect_server_actions_ctx(url, action_header=action_header)
     return _detect_server_actions_ctx(url, action_header=action_header)
 
 
@@ -488,8 +432,6 @@ def apply_server_actions_probe_results(
     probe_result: dict[str, Any] | None = None,
     tags: TagSet,
     signals: dict[str, Any],
-    proxy_profile: str | None = None,
-    correlation_id: str | None = None,
     action_header: str = SERVER_ACTIONS_DEFAULT_ACTION_HEADER,
     payload_style: str = "multipart",
     server_actions_tag: str | None = None,
@@ -501,7 +443,6 @@ def apply_server_actions_probe_results(
     fallback_html_signal_key: str | None = None,
     set_defaults: bool = False,
     default_confidence: str = "medium",
-    http_client: HttpClient | None = None,
     action_endpoints: list[str] | None = None,
 ) -> dict[str, Any]:
     """
@@ -530,9 +471,6 @@ def apply_server_actions_probe_results(
     return applier.apply(
         probe_result=probe_result,
         html_marker_hint=html_marker_hint,
-        proxy_profile=proxy_profile,
-        correlation_id=correlation_id,
-        http_client=http_client,
     )
 
 

@@ -19,6 +19,13 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """Utility exports."""
 
 from .actions import generate_action_id, generate_action_ids
+from .confidence import (
+    confidence_at_least,
+    confidence_label,
+    confidence_score,
+    lower_confidence,
+    raise_confidence,
+)
 from .tag_manager import TagSet
 from .version import (
     ParsedVersion,
@@ -33,6 +40,11 @@ from .version import (
 __all__ = [
     "generate_action_id",
     "generate_action_ids",
+    "confidence_at_least",
+    "confidence_label",
+    "confidence_score",
+    "lower_confidence",
+    "raise_confidence",
     "TagSet",
     "ParsedVersion",
     "compare_semver",

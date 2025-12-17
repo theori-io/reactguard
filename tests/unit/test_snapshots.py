@@ -15,7 +15,7 @@ def test_detection_snapshot_resolves_versions_and_context():
     )
     snapshot = DetectionSnapshot.from_detection(detection)
     assert snapshot.react_major == 19
-    ctx = snapshot.to_detect_context(http_client="client")
+    ctx = snapshot.to_detect_context()
     assert ctx["react_major_confidence"] == "high"
     assert ctx["server_action_endpoints"] == ["/RSC/F/abc/action.txt"]
 

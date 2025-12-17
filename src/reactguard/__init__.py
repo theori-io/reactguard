@@ -26,7 +26,6 @@ objects are modeled with typed dataclasses for clarity.
 """
 
 from .config import HttpSettings, load_http_settings
-from .errors import ErrorCategory
 from .framework_detection import FrameworkDetectionEngine
 from .http import (
     HttpClient,
@@ -40,19 +39,16 @@ from .log import setup_logging
 from .models import ScanReport, VulnerabilityReport
 from .models.poc import PocStatus
 from .runtime import ReactGuard
-from .scan.runner import ScanRunner
+from .scan import ScanEngine
 from .version import __version__
 from .vulnerability_detection import (
     CVE202555182VulnerabilityDetector,
     PocPlugin,
-    VulnerabilityDetectionRunner,
-    get_applicable_pocs,
-    poc_registry,
+    VulnerabilityDetectionEngine,
 )
 
 __all__ = [
     "CVE202555182VulnerabilityDetector",
-    "ErrorCategory",
     "FrameworkDetectionEngine",
     "HttpClient",
     "HttpRequest",
@@ -62,13 +58,11 @@ __all__ = [
     "PocPlugin",
     "PocStatus",
     "ScanReport",
-    "ScanRunner",
-    "VulnerabilityDetectionRunner",
+    "ScanEngine",
+    "VulnerabilityDetectionEngine",
     "VulnerabilityReport",
     "RetryConfig",
     "ReactGuard",
-    "get_applicable_pocs",
-    "poc_registry",
     "create_default_http_client",
     "load_http_settings",
     "setup_logging",

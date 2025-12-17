@@ -25,15 +25,13 @@ from .models import Headers, HttpRequest, HttpResponse, RetryConfig
 from .retry import build_default_retry_config, send_with_retries
 from .utils import (
     DEFAULT_USER_AGENT,
-    ErrorCategory,
     get_http_client,
+    request_with_retries,
     scan_with_retry,
-    set_shared_http_client,
 )
 
 __all__ = [
     "DEFAULT_USER_AGENT",
-    "ErrorCategory",
     "Headers",
     "HttpClient",
     "HttpxClient",
@@ -45,7 +43,7 @@ __all__ = [
     "build_default_retry_config",
     "create_default_http_client",
     "get_http_client",
+    "request_with_retries",
     "scan_with_retry",
     "send_with_retries",
-    "set_shared_http_client",
 ]

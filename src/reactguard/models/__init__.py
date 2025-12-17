@@ -18,7 +18,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 """Dataclass exports for ReactGuard."""
 
-from .http import Headers, HttpRequest, HttpResponse, RetryConfig
+from ..http.models import Headers, HttpRequest, HttpResponse, RetryConfig
 from .poc import PocRequest, PocResult, PocStatus
 from .probe import ProbeRequest, ProbeResult
 from .report import ScanReport, VulnerabilityReport

@@ -1,10 +1,11 @@
+from reactguard.framework_detection.detectors.generic_rsc import GenericRSCDetector
+from reactguard.framework_detection.detectors.nextjs import NextJSDetector
+from reactguard.framework_detection.detectors.react_router import ReactRouterDetector
+from reactguard.framework_detection.detectors.spa import SPADetector
+from reactguard.framework_detection.detectors.waku import WakuDetector
 from reactguard.framework_detection.engine import FrameworkDetectionEngine
-from reactguard.framework_detection.frameworks.generic_rsc import GenericRSCDetector
-from reactguard.framework_detection.frameworks.nextjs import NextJSDetector
-from reactguard.framework_detection.frameworks.react_router import ReactRouterDetector
-from reactguard.framework_detection.frameworks.spa import SPADetector
-from reactguard.framework_detection.frameworks.waku import WakuDetector
 from reactguard.framework_detection.scoring import score_confidence
+from reactguard.framework_detection.signals.waku import WakuServerActionsProbeResult
 from reactguard.http.models import HttpResponse
 from reactguard.models import ScanRequest
 from reactguard.utils.tag_manager import TagSet
@@ -40,7 +41,7 @@ def test_framework_detection_engine_runs_detectors(monkeypatch):
         url=None,
     )
     monkeypatch.setattr(
-        "reactguard.framework_detection.frameworks.nextjs.probe_server_actions_support",
+        "reactguard.framework_detection.detectors.nextjs.probe_server_actions_support",
         lambda *_, **__: {"supported": False, "status_code": 404, "has_framework_html_marker": True},
     )
     result = FrameworkDetectionEngine().detect(ScanRequest(url=None, response=response))
@@ -53,10 +54,10 @@ def test_framework_detection_engine_runs_detectors(monkeypatch):
 def test_framework_detection_engine_fetch_error(monkeypatch):
     monkeypatch.setattr(
         "reactguard.framework_detection.engine.send_with_retries",
-        lambda *_, **__: HttpResponse(ok=False, error_category="TIMEOUT", error_message="fail", url="http://example"),
+        lambda *_, **__: HttpResponse(ok=False, error_message="fail", error_type="TimeoutException", url="http://example"),
     )
     result = FrameworkDetectionEngine().detect(ScanRequest(url="http://example"))
-    assert result.signals["fetch_error_category"] == "TIMEOUT"
+    assert result.signals["fetch_error_message"] == "fail"
 
 
 def test_normalize_headers_merges_response_headers():
@@ -78,6 +79,13 @@ def test_apply_rsc_flags_marks_dependency_only():
     tags = TagSet()
     signals = {"react_bundle": True, "rsc_endpoint_found": False}
     FrameworkDetectionEngine._apply_rsc_flags(tags, signals)
+    assert signals["react_bundle_only"] is True
+
+
+def test_apply_rsc_flags_marks_rsc_runtime_dependency_only():
+    tags = TagSet()
+    signals = {"react_bundle": True, "react_server_dom_bundle": True, "rsc_endpoint_found": False}
+    FrameworkDetectionEngine._apply_rsc_flags(tags, signals)
     assert signals["rsc_dependency_only"] is True
 
 
@@ -88,7 +96,7 @@ def test_nextjs_detector_infers_react_major_from_flight():
 
 
 def test_spa_detector_tags_react_spa(monkeypatch):
-    monkeypatch.setattr("reactguard.framework_detection.frameworks.spa.probe_js_bundles", lambda *_, **__: {"react_bundle": True})
+    monkeypatch.setattr("reactguard.framework_detection.detectors.spa.probe_js_bundles", lambda *_, **__: {"react_bundle": True})
     detector = SPADetector()
     tags = TagSet()
     signals = {}
@@ -97,18 +105,18 @@ def test_spa_detector_tags_react_spa(monkeypatch):
         headers={},
         tags=tags,
         signals=signals,
-        context=type("Ctx", (), {"url": "http://example", "proxy_profile": None, "correlation_id": None, "http_client": None})(),
+        context=type("Ctx", (), {"url": "http://example", "http_client": None})(),
     )
     assert "react-spa" in tags
     assert signals["react_spa_structure"] is True
 
 
 def test_waku_detector_collects_signals(monkeypatch):
-    monkeypatch.setattr("reactguard.framework_detection.frameworks.waku.probe_waku_minimal_html", lambda *_, **__: True)
-    monkeypatch.setattr("reactguard.framework_detection.frameworks.waku.probe_waku_rsc_surface", lambda *_, **__: False)
+    monkeypatch.setattr("reactguard.framework_detection.detectors.waku.probe_waku_minimal_html", lambda *_, **__: True)
+    monkeypatch.setattr("reactguard.framework_detection.detectors.waku.probe_waku_rsc_surface", lambda *_, **__: False)
     monkeypatch.setattr(
-        "reactguard.framework_detection.frameworks.waku.probe_waku_server_actions",
-        lambda *_, **__: (True, 2, [("/RSC/F/abc/action.txt", "runAction")]),
+        "reactguard.framework_detection.detectors.waku.probe_waku_server_actions_result",
+        lambda *_, **__: WakuServerActionsProbeResult(has_actions=True, count=2, endpoints=[("/RSC/F/abc/action.txt", "runAction")]),
     )
     detector = WakuDetector()
     tags = TagSet()
@@ -118,7 +126,7 @@ def test_waku_detector_collects_signals(monkeypatch):
         headers={"x-waku-version": "0.19.0"},
         tags=tags,
         signals=signals,
-        context=type("Ctx", (), {"url": "http://example", "proxy_profile": None, "correlation_id": None, "http_client": None})(),
+        context=type("Ctx", (), {"url": "http://example", "http_client": None})(),
     )
     assert "waku" in tags and "rsc" in tags
     assert signals["server_actions_enabled"] is True
@@ -126,13 +134,17 @@ def test_waku_detector_collects_signals(monkeypatch):
     assert signals["server_action_endpoints"]
 
 
-def test_expo_detector_sets_experimental_flags(monkeypatch):
-    monkeypatch.setattr("reactguard.framework_detection.frameworks.expo.probe_js_bundles", lambda *_, **__: {"expo_router": True, "react_bundle": True})
+def test_expo_detector_tags_framework(monkeypatch):
+    monkeypatch.setattr("reactguard.framework_detection.detectors.expo.probe_js_bundles", lambda *_, **__: {"expo_router": True, "react_bundle": True})
     monkeypatch.setattr(
-        "reactguard.framework_detection.frameworks.expo.apply_rsc_probe_results",
-        lambda *_, **__: {"rsc_endpoint_found": True, "server_actions_enabled": True},
+        "reactguard.framework_detection.detectors.expo.probe_expo_server_functions",
+        lambda *_args, **_kwargs: type(
+            "ExpoProbe",
+            (),
+            {"has_rsc_surface": False, "server_action_endpoints": [], "evidence": {}},
+        )(),
     )
-    detector = __import__("reactguard.framework_detection.frameworks.expo", fromlist=["ExpoDetector"]).ExpoDetector()
+    detector = __import__("reactguard.framework_detection.detectors.expo", fromlist=["ExpoDetector"]).ExpoDetector()
     tags = TagSet()
     signals = {}
     detector.detect(
@@ -140,27 +152,14 @@ def test_expo_detector_sets_experimental_flags(monkeypatch):
         headers={},
         tags=tags,
         signals=signals,
-        context=type("Ctx", (), {"url": "http://example", "proxy_profile": None, "correlation_id": None, "http_client": None})(),
+        context=type("Ctx", (), {"url": "http://example", "http_client": None})(),
     )
     assert "expo" in tags
-    assert signals["expo_rsc_experimental"] is True
     assert signals["expo_router"] is True
 
 
-def test_react_router_detector_rsc_tag(monkeypatch):
-    monkeypatch.setattr("reactguard.framework_detection.frameworks.react_router.probe_js_bundles", lambda *_, **__: {"react_router_v7_bundle": True})
-
-    def fake_apply_rsc_probe_results(*_, **kwargs):
-        tags = kwargs.get("tags")
-        signals = kwargs.get("signals")
-        if signals is not None:
-            signals["server_actions_enabled"] = True
-            signals["rsc_endpoint_found"] = True
-        if tags is not None:
-            tags.add("react-router-v7-rsc")
-        return {"rsc_endpoint_found": True, "server_actions_enabled": True}
-
-    monkeypatch.setattr("reactguard.framework_detection.frameworks.react_router.apply_rsc_probe_results", fake_apply_rsc_probe_results)
+def test_react_router_detector_does_not_probe_rsc(monkeypatch):
+    monkeypatch.setattr("reactguard.framework_detection.detectors.react_router.probe_js_bundles", lambda *_, **__: {"react_router_v7_bundle": True})
 
     detector = ReactRouterDetector()
     tags = TagSet()
@@ -170,11 +169,11 @@ def test_react_router_detector_rsc_tag(monkeypatch):
         headers={},
         tags=tags,
         signals=signals,
-        context=type("Ctx", (), {"url": "http://example", "proxy_profile": None, "correlation_id": None, "http_client": None})(),
+        context=type("Ctx", (), {"url": "http://example", "http_client": None})(),
     )
     assert "react-router-v7" in tags
     assert signals["react_router_confidence"] == "high"
-    assert signals["server_actions_enabled"] is True
+    assert signals.get("server_actions_enabled") is None
 
 
 def test_generic_rsc_detector_sets_signals():

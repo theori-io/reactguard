@@ -19,6 +19,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """Signal probe exports."""
 
 from .bundle import probe_js_bundles
+from .expo_server_functions import probe_expo_server_functions
+from .react_router_server_functions import discover_react_router_server_functions
 from .rsc import (
     apply_rsc_probe_results,
     probe_rsc_and_actions,
@@ -40,8 +42,10 @@ from .waku import (
 __all__ = [
     "apply_server_actions_probe_results",
     "apply_rsc_probe_results",
+    "discover_react_router_server_functions",
     "detect_server_actions",
     "generate_action_id",
+    "probe_expo_server_functions",
     "probe_js_bundles",
     "probe_rsc_and_actions",
     "probe_rsc_endpoint",

@@ -20,7 +20,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 """HTTP request/response data models used across ReactGuard."""
 
-from collections.abc import Iterable, Mapping
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -39,8 +39,6 @@ class HttpRequest:
     body: bytes | str | None = None
     timeout: float | None = None
     allow_redirects: bool = True
-    proxy: str | None = None
-    correlation_id: str | None = None
 
 
 @dataclass
@@ -53,7 +51,6 @@ class HttpResponse:
     text: str = ""
     content: bytes = b""
     url: str | None = None
-    error_category: str | None = None
     error_message: str | None = None
     error_type: str | None = None
     meta: dict[str, Any] = field(default_factory=dict)
@@ -66,17 +63,47 @@ class HttpResponse:
     @classmethod
     def from_mapping(cls, data: Mapping[str, Any]) -> HttpResponse:
         """Helper to normalize dictionary-like responses (e.g., worker scan output)."""
+        raw_headers: Any = data.get("headers") or {}
+        if raw_headers and not isinstance(raw_headers, Mapping):
+            try:
+                raw_headers = dict(raw_headers)
+            except Exception:
+                raw_headers = {}
+        headers: Headers = {}
+        if isinstance(raw_headers, Mapping):
+            for key, value in raw_headers.items():
+                if key is None:
+                    continue
+                headers[str(key).lower()] = "" if value is None else str(value)
+
+        raw_body = data.get("body")
+        raw_snippet = data.get("body_snippet")
+        content: bytes = b""
+        text: str = ""
+
+        if isinstance(raw_body, (bytes, bytearray, memoryview)):
+            content = bytes(raw_body)
+            text = content.decode("utf-8", errors="replace")
+        elif isinstance(raw_body, str):
+            text = raw_body
+            content = raw_body.encode("utf-8")
+        elif isinstance(raw_snippet, (bytes, bytearray, memoryview)):
+            content = bytes(raw_snippet)
+            text = content.decode("utf-8", errors="replace")
+        elif isinstance(raw_snippet, str):
+            text = raw_snippet
+            content = raw_snippet.encode("utf-8")
+
         return cls(
             ok=bool(data.get("ok")),
             status_code=data.get("status_code"),
-            headers=dict(data.get("headers") or {}),
-            text=data.get("body") or data.get("body_snippet") or "",
-            content=(data.get("body") or "").encode("utf-8"),
+            headers=headers,
+            text=text,
+            content=content,
             url=data.get("url"),
-            error_category=data.get("error_category"),
             error_message=data.get("error_message"),
             error_type=data.get("error_type"),
-            meta={k: v for k, v in data.items() if k not in {"ok", "status_code", "headers", "body", "body_snippet"}},
+            meta={k: v for k, v in data.items() if k not in {"ok", "status_code", "headers", "body", "body_snippet", "url", "error_message", "error_type"}},
         )
 
 
@@ -87,8 +114,6 @@ class RetryConfig:
     max_attempts: int = 2
     backoff_factor: float = 2.0
     initial_delay: float = 1.0
-    retry_on: Iterable[str] = field(default_factory=set)
-    retry_never: Iterable[str] = field(default_factory=set)
 
     @classmethod
     def from_settings(cls, settings: HttpSettings) -> RetryConfig:
