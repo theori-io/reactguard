@@ -134,6 +134,21 @@ def test_dec2025_detector_returns_not_vulnerable_when_surface_closed():
     assert result.details["reason_code"] == MISSING_SURFACE_REASON_CODE
 
 
+def test_dec2025_detector_short_circuits_on_react18():
+    detection = FrameworkDetectionResult(
+        tags=[TAG_RSC],
+        signals={
+            SIG_DETECTION_CONFIDENCE_LEVEL: "high",
+            "detected_react_version": "18.2.0",
+            "detected_react_version_confidence": "high",
+        },
+    )
+    result = CVE202555184VulnerabilityDetector().evaluate("http://example", detection_result=detection)
+    assert result.status == PocStatus.NOT_APPLICABLE
+    assert result.details["not_affected"] is True
+    assert "React 18.x" in str(result.details.get("reason") or "")
+
+
 def test_rsc_dependency_only_short_circuits_dec2025_family():
     detection = FrameworkDetectionResult(
         tags=[TAG_REACT_ROUTER_V7, TAG_REACT_STREAMING],
