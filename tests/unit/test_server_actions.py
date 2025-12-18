@@ -86,5 +86,5 @@ def test_apply_server_actions_probe_results_fallback(monkeypatch):
         set_defaults=True,
     )
     assert outcome["supported"] is True
-    assert signals["server_actions_enabled"] is True
-    assert signals["server_actions_confidence"]
+    assert signals["invocation_enabled"] is True
+    assert signals["invocation_confidence"]

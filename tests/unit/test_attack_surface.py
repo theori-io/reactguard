@@ -3,9 +3,9 @@
 
 from reactguard.framework_detection.keys import (
     SIG_DETECTION_CONFIDENCE_LEVEL,
+    SIG_INVOCATION_CONFIDENCE,
+    SIG_INVOCATION_ENABLED,
     SIG_REACT_BUNDLE_ONLY,
-    SIG_SERVER_ACTIONS_CONFIDENCE,
-    SIG_SERVER_ACTIONS_ENABLED,
     TAG_NEXTJS,
     TAG_NEXTJS_PAGES_ROUTER,
     TAG_REACT_ROUTER_V7,
@@ -36,9 +36,9 @@ def test_surface_compute_pages_router_requires_confidence():
         detected_versions={},
         react_major=None,
         react_major_confidence=None,
-        server_actions_enabled=None,
-        server_actions_confidence=None,
-        server_action_endpoints=[],
+        invocation_enabled=None,
+        invocation_confidence=None,
+        invocation_endpoints=[],
     )
     surface_low = compute_rsc_server_functions_surface(snap_low)
     assert surface_low.server_functions_surface is None
@@ -49,25 +49,25 @@ def test_surface_compute_pages_router_requires_confidence():
         detected_versions={},
         react_major=None,
         react_major_confidence=None,
-        server_actions_enabled=None,
-        server_actions_confidence=None,
-        server_action_endpoints=[],
+        invocation_enabled=None,
+        invocation_confidence=None,
+        invocation_endpoints=[],
     )
     surface_med = compute_rsc_server_functions_surface(snap_med)
     assert surface_med.server_functions_surface is False
     assert surface_med.confidence == "high"
 
 
-def test_surface_compute_server_actions_absent_high_confidence_is_closed():
+def test_surface_compute_invocation_absent_high_confidence_is_closed():
     snap = DetectionSnapshot(
         tags=[],
-        signals={SIG_SERVER_ACTIONS_ENABLED: False, SIG_SERVER_ACTIONS_CONFIDENCE: "high"},
+        signals={SIG_INVOCATION_ENABLED: False, SIG_INVOCATION_CONFIDENCE: "high"},
         detected_versions={},
         react_major=None,
         react_major_confidence=None,
-        server_actions_enabled=False,
-        server_actions_confidence="high",
-        server_action_endpoints=[],
+        invocation_enabled=False,
+        invocation_confidence="high",
+        invocation_endpoints=[],
     )
     surface = compute_rsc_server_functions_surface(snap)
     assert surface.server_functions_surface is False
@@ -81,9 +81,9 @@ def test_surface_compute_waku_requires_entrypoint_when_waku_evidence_present():
         detected_versions={},
         react_major=None,
         react_major_confidence=None,
-        server_actions_enabled=None,
-        server_actions_confidence=None,
-        server_action_endpoints=[],
+        invocation_enabled=None,
+        invocation_confidence=None,
+        invocation_endpoints=[],
     )
     surface = compute_rsc_server_functions_surface(snap)
     assert surface.entrypoint_required is True
@@ -101,9 +101,9 @@ def test_build_missing_surface_report_has_reason_code_and_attack_surface():
         detected_versions={},
         react_major=None,
         react_major_confidence=None,
-        server_actions_enabled=None,
-        server_actions_confidence=None,
-        server_action_endpoints=[],
+        invocation_enabled=None,
+        invocation_confidence=None,
+        invocation_endpoints=[],
     )
     surface = compute_rsc_server_functions_surface(snap)
     report = build_missing_surface_report(
@@ -214,7 +214,7 @@ def test_55182_default_rule_marks_missing_surface_and_skips_dec2025(monkeypatch)
             "details": {
                 "cve_id": "CVE-2025-55182",
                 "confidence": "high",
-                "reason": "No RSC processing detected",
+                "reason": "No RSC Flight or Flight protocol payload deserialization observed on tested endpoints",
                 "decision_rule": "_default_rule",
                 "surface_detected": False,
             },
@@ -249,10 +249,10 @@ def test_55182_server_actions_missing_marks_missing_surface_and_skips_dec2025(mo
             "details": {
                 "cve_id": "CVE-2025-55182",
                 "confidence": "high",
-                "reason": "Server Actions not detected; probes did not observe RSC Server Functions decoding (React2Shell requires Server Actions)",
+                "reason": "Server Actions not detected; Flight protocol payload deserialization not reachable on tested endpoints",
                 "decision_rule": "_rule_server_actions_missing",
                 "surface_detected": True,
-                "server_actions_expected": False,
+                "invocation_expected": False,
                 "decode_surface_reached": False,
             },
             "raw_data": {},
@@ -284,14 +284,17 @@ def test_55182_html_only_rsc_marks_missing_surface_and_skips_dec2025(monkeypatch
         "reactguard.vulnerability_detection.cves.cve_2025_55182.run_assessor_with_context",
         lambda *_args, **_kwargs: {
             "status": PocStatus.NOT_VULNERABLE,
-            "details": {
-                "cve_id": "CVE-2025-55182",
-                "confidence": "high",
-                "reason": "RSC framework detected but probes returned HTML; no reachable Server Actions decode surface observed on tested endpoints",
-                "decision_rule": "_rule_html_only_responses",
-                "surface_detected": True,
-                "server_actions_expected": None,
-                "decode_surface_reached": False,
+                "details": {
+                    "cve_id": "CVE-2025-55182",
+                    "confidence": "high",
+                    "reason": (
+                        "Expected Flight protocol payload deserialization (based on RSC and Server Actions hints), "
+                        "but probes returned only HTML; endpoint may be blocked or incorrect"
+                    ),
+                    "decision_rule": "_rule_html_only_responses",
+                    "surface_detected": True,
+                    "invocation_expected": None,
+                    "decode_surface_reached": False,
             },
             "raw_data": {},
         },
@@ -335,7 +338,7 @@ def test_waku_entrypoint_missing_but_expected_is_inconclusive(monkeypatch):
         signals={
             "waku_meta_generator": True,
             SIG_DETECTION_CONFIDENCE_LEVEL: "high",
-            SIG_SERVER_ACTIONS_ENABLED: True,
+            SIG_INVOCATION_ENABLED: True,
         },
     )
 

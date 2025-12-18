@@ -14,26 +14,18 @@ from ..constants import (
     NEXTJS_MANIFEST_PATTERN,
     NEXTJS_NEXT_DATA_PATTERN,
     NEXTJS_NEXT_F_PATTERN,
-    NEXTJS_RSC_FLIGHT_PATTERN_V18_HTML,
-    NEXTJS_RSC_FLIGHT_PATTERN_V18_HTML_ESCAPED,
-    NEXTJS_RSC_FLIGHT_PATTERN_V18_SIMPLE,
-    NEXTJS_RSC_FLIGHT_PATTERN_V18_SIMPLE_ESCAPED,
-    NEXTJS_RSC_FLIGHT_PATTERN_V18_WRAPPED,
-    NEXTJS_RSC_FLIGHT_PATTERN_V18_WRAPPED_ESCAPED,
-    NEXTJS_RSC_FLIGHT_PATTERN_V19_HTML_ESCAPED,
-    NEXTJS_RSC_FLIGHT_PATTERN_V19_OBJECT,
-    NEXTJS_RSC_FLIGHT_PATTERN_V19_OBJECT_ESCAPED,
     NEXTJS_STATIC_PATH_PATTERN,
 )
 from ..keys import (
+    SIG_INVOCATION_ENABLED,
     SIG_RSC_CONTENT_TYPE,
     SIG_RSC_ENDPOINT_FOUND,
     SIG_RSC_FLIGHT_PAYLOAD,
-    SIG_SERVER_ACTIONS_ENABLED,
     TAG_NEXTJS,
     TAG_NEXTJS_APP_ROUTER,
     TAG_NEXTJS_PAGES_ROUTER,
 )
+from ..nextjs_flight import infer_react_major_from_nextjs_html
 from ..signals.server_actions import (
     ServerActionsSignalApplier,
     probe_server_actions_support,
@@ -48,24 +40,7 @@ class NextJSDetector(FrameworkDetector):
     @classmethod
     def _react_major_from_flight(cls, body: str) -> Any:
         """Infer React major version from Flight payloads embedded in HTML."""
-        if not body:
-            return None
-        if (
-            NEXTJS_RSC_FLIGHT_PATTERN_V19_HTML_ESCAPED in body
-            or NEXTJS_RSC_FLIGHT_PATTERN_V19_OBJECT in body
-            or NEXTJS_RSC_FLIGHT_PATTERN_V19_OBJECT_ESCAPED in body
-        ):
-            return 19
-        if NEXTJS_RSC_FLIGHT_PATTERN_V18_WRAPPED in body or NEXTJS_RSC_FLIGHT_PATTERN_V18_WRAPPED_ESCAPED in body:
-            return 18
-        if (
-            NEXTJS_RSC_FLIGHT_PATTERN_V18_HTML.search(body)
-            or NEXTJS_RSC_FLIGHT_PATTERN_V18_HTML_ESCAPED.search(body)
-            or NEXTJS_RSC_FLIGHT_PATTERN_V18_SIMPLE.search(body)
-            or NEXTJS_RSC_FLIGHT_PATTERN_V18_SIMPLE_ESCAPED.search(body)
-        ):
-            return 18
-        return None
+        return infer_react_major_from_nextjs_html(body)
 
     def detect(
         self,
@@ -116,7 +91,7 @@ class NextJSDetector(FrameworkDetector):
             is_nextjs = True
             signals["nextjs_signature"] = True
 
-        if is_nextjs and context.url and signals.get(SIG_SERVER_ACTIONS_ENABLED) is None:
+        if is_nextjs and context.url and signals.get(SIG_INVOCATION_ENABLED) is None:
             sa_result = probe_server_actions_support(
                 context.url,
                 payload_style="multipart",
@@ -163,7 +138,10 @@ class NextJSDetector(FrameworkDetector):
                     should_set = True
                 elif confidence_score(new_confidence) > confidence_score(current_confidence):
                     should_set = True
-                elif confidence_score(new_confidence) == confidence_score(current_confidence) and react_major_source_priority(new_source) > react_major_source_priority(current_source):
+                elif (
+                    confidence_score(new_confidence) == confidence_score(current_confidence)
+                    and react_major_source_priority(new_source) > react_major_source_priority(current_source)
+                ):
                     should_set = True
 
                 if should_set:
@@ -172,7 +150,7 @@ class NextJSDetector(FrameworkDetector):
                     signals[f"{key}_source"] = new_source
 
         # Only promote to App Router when we have RSC markers or action support
-        if signals.get(SIG_SERVER_ACTIONS_ENABLED) or signals.get(SIG_RSC_ENDPOINT_FOUND) or signals.get(SIG_RSC_CONTENT_TYPE):
+        if signals.get(SIG_INVOCATION_ENABLED) or signals.get(SIG_RSC_ENDPOINT_FOUND) or signals.get(SIG_RSC_CONTENT_TYPE):
             if tags.remove(TAG_NEXTJS_PAGES_ROUTER):
                 signals["nextjs_pages_router"] = False
             tags.add(TAG_NEXTJS_APP_ROUTER)

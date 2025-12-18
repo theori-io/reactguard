@@ -16,7 +16,7 @@ class TestApplyRscProbeResults(unittest.TestCase):
         signals = {}
 
         with patch("reactguard.framework_detection.signals.rsc.probe_rsc_and_actions") as mock_probe:
-            mock_probe.return_value = {"rsc_endpoint_found": True, "server_actions_enabled": False}
+            mock_probe.return_value = {"rsc_endpoint_found": True, "invocation_enabled": False}
 
             result = apply_rsc_probe_results(
                 "http://example.com",
@@ -28,14 +28,14 @@ class TestApplyRscProbeResults(unittest.TestCase):
         self.assertTrue(result["rsc_endpoint_found"])
         self.assertIn("rsc-tag", tags)
         self.assertTrue(signals["rsc_endpoint_found"])
-        self.assertNotIn("server_actions_enabled", signals)
+        self.assertNotIn("invocation_enabled", signals)
 
     def test_server_actions_can_imply_rsc_and_defaults(self):
         tags = TagSet()
         signals = {}
 
         with patch("reactguard.framework_detection.signals.rsc.probe_rsc_and_actions") as mock_probe:
-            mock_probe.return_value = {"rsc_endpoint_found": False, "server_actions_enabled": True}
+            mock_probe.return_value = {"rsc_endpoint_found": False, "invocation_enabled": True}
 
             result = apply_rsc_probe_results(
                 "http://example.com",
@@ -45,31 +45,31 @@ class TestApplyRscProbeResults(unittest.TestCase):
                 server_actions_tag="expo-server-actions",
                 server_actions_imply_rsc=True,
                 set_defaults=True,
-            )
+        )
 
         self.assertFalse(result["rsc_endpoint_found"])
-        self.assertTrue(result["server_actions_enabled"])
+        self.assertTrue(result["invocation_enabled"])
         self.assertIn("expo-rsc", tags)
         self.assertIn("expo-server-actions", tags)
         self.assertTrue(signals["rsc_endpoint_found"])
-        self.assertTrue(signals["server_actions_enabled"])
+        self.assertTrue(signals["invocation_enabled"])
 
     def test_defaults_do_not_override_existing_true(self):
         tags = TagSet()
-        signals = {"server_actions_enabled": True}
+        signals = {"invocation_enabled": True}
 
         with patch("reactguard.framework_detection.signals.rsc.probe_rsc_and_actions") as mock_probe:
-            mock_probe.return_value = {"rsc_endpoint_found": False, "server_actions_enabled": False}
+            mock_probe.return_value = {"rsc_endpoint_found": False, "invocation_enabled": False}
 
             apply_rsc_probe_results(
                 "http://example.com",
                 tags=tags,
                 signals=signals,
                 set_defaults=True,
-            )
+        )
 
         self.assertFalse(signals["rsc_endpoint_found"])
-        self.assertTrue(signals["server_actions_enabled"])
+        self.assertTrue(signals["invocation_enabled"])
 
 
 if __name__ == "__main__":

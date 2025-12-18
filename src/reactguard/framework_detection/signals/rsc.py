@@ -10,7 +10,7 @@ from ...http import request_with_retries
 from ...http.headers import normalize_headers
 from ...utils import TagSet
 from ..constants import RSC_PROBE_FLIGHT_BODY_PATTERN
-from ..keys import SIG_RSC_ENDPOINT_FOUND, SIG_SERVER_ACTIONS_CONFIDENCE, SIG_SERVER_ACTIONS_ENABLED
+from ..keys import SIG_INVOCATION_CONFIDENCE, SIG_INVOCATION_ENABLED, SIG_RSC_ENDPOINT_FOUND
 from .server_actions import probe_server_actions_support
 
 
@@ -29,12 +29,12 @@ class RscSignalApplier:
     def apply(
         self,
     ) -> dict[str, bool]:
-        probe_result = {"rsc_endpoint_found": False, "server_actions_enabled": False}
+        probe_result = {"rsc_endpoint_found": False, "invocation_enabled": False}
         if self.base_url:
             probe_result = probe_rsc_and_actions(self.base_url)
 
         rsc_found = bool(probe_result.get("rsc_endpoint_found"))
-        actions_found = bool(probe_result.get("server_actions_enabled"))
+        actions_found = bool(probe_result.get("invocation_enabled"))
         promote_rsc = rsc_found or (self.server_actions_imply_rsc and actions_found)
 
         if promote_rsc:
@@ -45,14 +45,14 @@ class RscSignalApplier:
             self.signals.setdefault(SIG_RSC_ENDPOINT_FOUND, False)
 
         if actions_found:
-            self.signals[SIG_SERVER_ACTIONS_ENABLED] = True
+            self.signals[SIG_INVOCATION_ENABLED] = True
             if self.server_actions_tag:
                 self.tags.add(self.server_actions_tag)
         elif self.set_defaults:
-            self.signals.setdefault(SIG_SERVER_ACTIONS_ENABLED, None)
-            self.signals.setdefault(SIG_SERVER_ACTIONS_CONFIDENCE, "none")
+            self.signals.setdefault(SIG_INVOCATION_ENABLED, None)
+            self.signals.setdefault(SIG_INVOCATION_CONFIDENCE, "none")
 
-        return {"rsc_endpoint_found": rsc_found, "server_actions_enabled": actions_found}
+        return {"rsc_endpoint_found": rsc_found, "invocation_enabled": actions_found}
 
 
 def _probe_rsc_endpoint_ctx(endpoint_url: str) -> bool:
@@ -119,7 +119,7 @@ def probe_server_actions(
 def _probe_rsc_and_actions_ctx(base_url: str) -> dict[str, bool]:
     return {
         "rsc_endpoint_found": _probe_rsc_endpoint_ctx(base_url),
-        "server_actions_enabled": _probe_server_actions_ctx(base_url),
+        "invocation_enabled": _probe_server_actions_ctx(base_url),
     }
 
 

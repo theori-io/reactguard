@@ -74,7 +74,7 @@ class TestNextJSAssessor(unittest.TestCase):
         run_probes.assert_called_once()
         analyzer_cls.return_value.analyze.assert_called_once()
         self.assertEqual(analyzer_cls.return_value.analyze.call_args.kwargs["action_ids"], fake_actions)
-        self.assertTrue(analyzer_cls.call_args.kwargs["server_actions_expected"])
+        self.assertTrue(analyzer_cls.call_args.kwargs["invocation_expected"])
         self.assertEqual(analyzer_cls.call_args.kwargs["react_major"], 19)
 
     def test_confirmation_round_runs_on_vulnerable(self):
@@ -122,7 +122,7 @@ class TestNextJSAssessor(unittest.TestCase):
 
 
 class TestGenericRSCAssessor(unittest.TestCase):
-    def test_passes_server_actions_flag(self):
+    def test_passes_invocation_flag(self):
         assessor = GenericRSCAssessor()
         fake_actions = ["40ddd", "40eee", "40fff"]
         with (
@@ -140,14 +140,14 @@ class TestGenericRSCAssessor(unittest.TestCase):
             result = assessor.evaluate(
                 base_url="http://localhost",
                 detected_versions={"react_version": "19.0.0"},
-                detect_context={"react_major": 19, "server_actions_enabled": False},
+                detect_context={"react_major": 19, "invocation_enabled": False},
             )
 
         self.assertEqual(result["status"], PocStatus.INCONCLUSIVE)
         run_probes.assert_called_once()
         analyzer_cls.return_value.analyze.assert_called_once()
         self.assertEqual(analyzer_cls.return_value.analyze.call_args.kwargs["action_ids"], fake_actions)
-        self.assertFalse(analyzer_cls.call_args.kwargs["server_actions_expected"])
+        self.assertFalse(analyzer_cls.call_args.kwargs["invocation_expected"])
         self.assertEqual(analyzer_cls.call_args.kwargs["react_major"], 19)
 
 
@@ -182,7 +182,7 @@ class TestReactRouterAssessor(unittest.TestCase):
 
         run_probes.assert_not_called()
         self.assertEqual(result["status"], PocStatus.NOT_VULNERABLE)
-        self.assertIn("server actions", result["details"]["reason"].lower())
+        self.assertIn("server functions", result["details"]["reason"].lower())
 
 
 if __name__ == "__main__":

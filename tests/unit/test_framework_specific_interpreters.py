@@ -21,7 +21,7 @@ def test_expo_connection_closed_is_likely_not_vulnerable():
 
     analyzer = ExpoInterpreter(
         is_rsc_framework=True,
-        server_actions_expected=True,
+        invocation_expected=True,
         journal=PocJournal(),
     )
     result = analyzer.analyze(probe_results, control_results=control_results)
@@ -41,7 +41,7 @@ def test_expo_prototype_error_is_vulnerable():
 
     analyzer = ExpoInterpreter(
         is_rsc_framework=True,
-        server_actions_expected=True,
+        invocation_expected=True,
         journal=PocJournal(),
     )
     result = analyzer.analyze(probe_results, control_results=control_results)
@@ -62,7 +62,7 @@ def test_react_router_structural_divergence_is_vulnerable():
 
     analyzer = ReactRouterInterpreter(
         is_rsc_framework=True,
-        server_actions_expected=True,
+        invocation_expected=True,
         journal=PocJournal(),
     )
     result = analyzer.analyze(probe_results, control_results=control_results)

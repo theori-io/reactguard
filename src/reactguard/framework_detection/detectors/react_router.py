@@ -14,10 +14,10 @@ from ..constants import (
     RR_VERSION_PATTERN,
 )
 from ..keys import (
+    SIG_INVOCATION_CONFIDENCE,
+    SIG_INVOCATION_ENABLED,
+    SIG_INVOCATION_ENDPOINTS,
     SIG_RSC_ENDPOINT_FOUND,
-    SIG_SERVER_ACTION_ENDPOINTS,
-    SIG_SERVER_ACTIONS_CONFIDENCE,
-    SIG_SERVER_ACTIONS_ENABLED,
     TAG_REACT_ROUTER_V5,
     TAG_REACT_ROUTER_V6,
     TAG_REACT_ROUTER_V7,
@@ -115,7 +115,7 @@ class ReactRouterDetector(FrameworkDetector):
         # React Router Server Functions are v7-only. When present, action IDs are embedded in HTML
         # as `$ACTION_ID_<id>` hidden inputs, which is a strong v7 signal even when bundle-based
         # heuristics misclassify the major.
-        if context.url and signals.get(SIG_SERVER_ACTIONS_ENABLED) is None:
+        if context.url and signals.get(SIG_INVOCATION_ENABLED) is None:
             should_try_actions = detected_version == "v7" or "$ACTION_ID_" in body
             if should_try_actions:
                 discovery = discover_react_router_server_functions(body, context.url)
@@ -125,12 +125,12 @@ class ReactRouterDetector(FrameworkDetector):
                     tags.add(TAG_REACT_ROUTER_V7_RSC)
                     tags.add(TAG_REACT_ROUTER_V7_SERVER_ACTIONS)
                     signals[SIG_RSC_ENDPOINT_FOUND] = True
-                    signals[SIG_SERVER_ACTIONS_ENABLED] = True
-                    signals[SIG_SERVER_ACTIONS_CONFIDENCE] = "medium"
+                    signals[SIG_INVOCATION_ENABLED] = True
+                    signals[SIG_INVOCATION_CONFIDENCE] = "medium"
                     signals["react_router_server_action_ids"] = list(discovery.action_ids)
                     if discovery.action_endpoints:
-                        signals[SIG_SERVER_ACTION_ENDPOINTS] = list(discovery.action_endpoints)
-                        signals[SIG_SERVER_ACTIONS_CONFIDENCE] = "high"
+                        signals[SIG_INVOCATION_ENDPOINTS] = list(discovery.action_endpoints)
+                        signals[SIG_INVOCATION_CONFIDENCE] = "high"
 
         if detected_version == "v7":
             tags.add(TAG_REACT_ROUTER_V7)

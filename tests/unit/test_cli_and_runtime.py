@@ -19,7 +19,7 @@ def test_build_parser_and_pretty_print(capsys):
         "status": PocStatus.VULNERABLE,
         "framework_detection": {
             "tags": ["nextjs", "rsc"],
-            "signals": {"nextjs_app_router": True, "server_actions_enabled": True},
+            "signals": {"nextjs_app_router": True, "invocation_enabled": True},
         },
         "vulnerability_detection": {
             "status": PocStatus.VULNERABLE,

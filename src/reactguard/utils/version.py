@@ -143,6 +143,11 @@ class VersionPatterns:
     # should validate/ignore matches based on surrounding context when possible.
     REACT_VERSION_ASSIGN = re.compile(rf'\bversion\s*=\s*"({SEMVER_PATTERN})"')
 
+    # Some toolchains keep the version in a dedicated constant (often from unminified / DEV builds),
+    # e.g. `var ReactVersion = '18.3.0-canary-...'` and later `exports.version = ReactVersion`.
+    # Next.js dev bundles can embed these sources inside eval'd strings, so allow optionally-escaped quotes.
+    REACT_VERSION_CONST = re.compile(rf"\bReactVersion\s*=\s*\\?['\"]({SEMVER_PATTERN})\\?['\"]")
+
 
 def extract_versions(headers: dict[str, str], body: str, *, case_sensitive_body: bool = False) -> dict[str, Any]:
     versions: dict[str, Any] = {}
@@ -233,6 +238,10 @@ def extract_versions(headers: dict[str, str], body: str, *, case_sensitive_body:
             or "react.dev/errors/" in react_hint_body
         )
     ):
+        const_match = _search(VersionPatterns.REACT_VERSION_CONST, body)
+        if const_match:
+            _maybe_set_version("react_version", const_match.group(1), "react_version_const", "medium")
+
         # Fall back to the React.version string embedded in many bundled React builds.
         #
         # Guardrails:

@@ -73,7 +73,7 @@ class TestConfidenceScoring(unittest.TestCase):
             "nextjs_hydration_array": True,
             "rsc_flight_payload": True,
             "waku_root": True,
-            "server_actions_enabled": True,
+            "invocation_enabled": True,
         }
         score, level, breakdown = score_confidence(signals)
         self.assertEqual(score, 100)
