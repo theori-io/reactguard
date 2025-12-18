@@ -126,16 +126,28 @@ class ServerActionsSignalApplier:
             if self.server_actions_tag:
                 self.tags.add(self.server_actions_tag)
         elif status in (404, 405) and not action_not_found:
-            self.signals[SIG_SERVER_ACTIONS_ENABLED] = False
-            self.signals[SIG_SERVER_ACTIONS_CONFIDENCE] = "high"
+            # A 404/405 on an arbitrary POST probe can mean:
+            # - actions disabled, or
+            # - wrong route / app blocks POST on this page, or
+            # - auth/routing differences.
+            #
+            # Only treat this as a confident negative when we are probing a known action endpoint.
+            if self.action_endpoints:
+                self.signals[SIG_SERVER_ACTIONS_ENABLED] = False
+                self.signals[SIG_SERVER_ACTIONS_CONFIDENCE] = "high"
+            else:
+                self.signals.setdefault(SIG_SERVER_ACTIONS_ENABLED, None)
+                self.signals.setdefault(SIG_SERVER_ACTIONS_CONFIDENCE, "low")
         elif is_html and has_framework_marker:
-            self.signals[SIG_SERVER_ACTIONS_ENABLED] = False
-            self.signals[SIG_SERVER_ACTIONS_CONFIDENCE] = "low"
+            # HTML wrappers/dev overlays are often uninterpretable for action reachability (FN-prone).
+            # Record the hint but keep reachability unknown.
+            self.signals.setdefault(SIG_SERVER_ACTIONS_ENABLED, None)
+            self.signals.setdefault(SIG_SERVER_ACTIONS_CONFIDENCE, "low")
             if self.fallback_html_signal_key:
                 self.signals[self.fallback_html_signal_key] = True
         elif self.set_defaults:
             self.signals.setdefault(SIG_SERVER_ACTIONS_ENABLED, None)
-            self.signals.setdefault(SIG_SERVER_ACTIONS_CONFIDENCE, "none")
+            self.signals.setdefault(SIG_SERVER_ACTIONS_CONFIDENCE, "low")
 
         return {
             "supported": supported,
@@ -315,8 +327,8 @@ def _detect_server_actions_ctx(
     if not scan.get("ok"):
         return {
             "supported": False,
-            "confidence": "none",
-            "reason": scan.get("error_message", "Probe failed"),
+            "confidence": "low",
+            "reason": scan.get("error_message", "Server Actions probe failed"),
             "error_message": scan.get("error_message"),
             "error_type": scan.get("error_type"),
         }
@@ -334,8 +346,8 @@ def _detect_server_actions_ctx(
     if status_code in (404, 405):
         return {
             "supported": False,
-            "confidence": "high",
-            "reason": f"Endpoint returned {status_code} - server actions not available",
+            "confidence": "medium",
+            "reason": f"Endpoint returned {status_code} - Server Actions not observed on this route",
             "status_code": status_code,
             "content_type": content_type,
             "has_rsc_format": False,
@@ -345,7 +357,7 @@ def _detect_server_actions_ctx(
         return {
             "supported": True,
             "confidence": "low",
-            "reason": "HTML response with framework markers - likely dev/HTML wrapper on action path",
+            "reason": "HTML 200 response to Server Actions probe - possible dev/HTML wrapper on action path",
             "status_code": status_code,
             "content_type": content_type,
             "has_rsc_format": False,
@@ -355,7 +367,7 @@ def _detect_server_actions_ctx(
         return {
             "supported": True,
             "confidence": "low",
-            "reason": "HTML 500 from POST with framework markers - likely dev overlay on action path",
+            "reason": "HTML 500 response to Server Actions probe - possible dev error page on action path",
             "status_code": status_code,
             "content_type": content_type,
             "has_rsc_format": False,
@@ -366,7 +378,7 @@ def _detect_server_actions_ctx(
             return {
                 "supported": True,
                 "confidence": "high",
-                "reason": "RSC response received - server actions enabled",
+                "reason": "RSC Flight response received - Server Actions enabled",
                 "status_code": status_code,
                 "content_type": content_type,
                 "has_rsc_format": True,
@@ -375,7 +387,7 @@ def _detect_server_actions_ctx(
             return {
                 "supported": True,
                 "confidence": "high",
-                "reason": "RSC error response - server actions enabled (error in action processing)",
+                "reason": "RSC error response received - Server Actions enabled (action processing returned 5xx)",
                 "status_code": status_code,
                 "content_type": content_type,
                 "has_rsc_format": True,
@@ -383,7 +395,7 @@ def _detect_server_actions_ctx(
         return {
             "supported": True,
             "confidence": "medium",
-            "reason": f"RSC format detected with status {status_code}",
+            "reason": f"RSC Flight format detected with status {status_code}",
             "status_code": status_code,
             "content_type": content_type,
             "has_rsc_format": True,
@@ -393,7 +405,7 @@ def _detect_server_actions_ctx(
         return {
             "supported": True,
             "confidence": "low",
-            "reason": "Server error (500) from POST - possible server action processing",
+            "reason": "Non-HTML 500 response to Server Actions probe - possible Server Actions processing",
             "status_code": status_code,
             "content_type": content_type,
             "has_rsc_format": False,
@@ -403,7 +415,7 @@ def _detect_server_actions_ctx(
         return {
             "supported": False,
             "confidence": "medium",
-            "reason": f"Redirect ({status_code}) - server actions likely not enabled",
+            "reason": f"Redirect ({status_code}) - Server Actions likely not enabled",
             "status_code": status_code,
             "content_type": content_type,
             "has_rsc_format": False,
@@ -412,7 +424,7 @@ def _detect_server_actions_ctx(
     return {
         "supported": False,
         "confidence": "low",
-        "reason": f"Inconclusive response (status {status_code})",
+        "reason": f"Inconclusive Server Actions probe response (status {status_code})",
         "status_code": status_code,
         "content_type": content_type,
         "has_rsc_format": has_flight_format,

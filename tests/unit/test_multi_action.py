@@ -165,7 +165,7 @@ class TestMultiActionInterpreter(unittest.TestCase):
 
         self.assertEqual(result["status"], PocStatus.LIKELY_NOT_VULNERABLE)
         self.assertIs(result["details"].get("decode_surface_reached"), False)
-        self.assertIn("action validation", result["details"]["reason"].lower())
+        self.assertEqual(result["details"]["decision_rule"], "_rule_rsc_validation_without_success")
 
     def test_prototype_error_pattern_marks_likely_vulnerable(self):
         probe_results = [

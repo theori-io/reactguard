@@ -184,6 +184,82 @@ def test_55182_default_rule_marks_missing_surface_and_skips_dec2025(monkeypatch)
         assert result_55184.details["reason_code"] == MISSING_SURFACE_REASON_CODE
 
 
+def test_55182_server_actions_missing_marks_missing_surface_and_skips_dec2025(monkeypatch):
+    detection = FrameworkDetectionResult(
+        tags=[TAG_NEXTJS, TAG_REACT_STREAMING],
+        signals={SIG_DETECTION_CONFIDENCE_LEVEL: "low"},
+    )
+
+    monkeypatch.setattr(
+        "reactguard.vulnerability_detection.cves.cve_2025_55182.run_assessor_with_context",
+        lambda *_args, **_kwargs: {
+            "status": PocStatus.NOT_VULNERABLE,
+            "details": {
+                "cve_id": "CVE-2025-55182",
+                "confidence": "high",
+                "reason": "Server Actions not detected; probes did not observe RSC Server Functions decoding (React2Shell requires Server Actions)",
+                "decision_rule": "_rule_server_actions_missing",
+                "surface_detected": True,
+                "server_actions_expected": False,
+                "decode_surface_reached": False,
+            },
+            "raw_data": {},
+        },
+    )
+    monkeypatch.setattr(
+        "reactguard.vulnerability_detection.cves._rsc_dec2025_base.run_assessor_with_context",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("Dec 2025 assessor should be skipped when surface is marked missing")),
+    )
+
+    with scan_context(extra={}):
+        result_55182 = CVE202555182VulnerabilityDetector().evaluate("http://example", detection_result=detection)
+        assert result_55182.status == PocStatus.NOT_VULNERABLE
+        assert result_55182.details["decision_rule"] == "_rule_server_actions_missing"
+
+        result_55184 = CVE202555184VulnerabilityDetector().evaluate("http://example", detection_result=detection)
+        assert result_55184.status == PocStatus.NOT_VULNERABLE
+        assert result_55184.details["reason_code"] == MISSING_SURFACE_REASON_CODE
+        assert result_55184.details["attack_surface"]["server_functions_surface"] is False
+
+
+def test_55182_html_only_rsc_marks_missing_surface_and_skips_dec2025(monkeypatch):
+    detection = FrameworkDetectionResult(
+        tags=[TAG_NEXTJS, TAG_REACT_STREAMING],
+        signals={SIG_DETECTION_CONFIDENCE_LEVEL: "low"},
+    )
+
+    monkeypatch.setattr(
+        "reactguard.vulnerability_detection.cves.cve_2025_55182.run_assessor_with_context",
+        lambda *_args, **_kwargs: {
+            "status": PocStatus.NOT_VULNERABLE,
+            "details": {
+                "cve_id": "CVE-2025-55182",
+                "confidence": "high",
+                "reason": "RSC framework detected but probes returned HTML; no reachable Server Actions decode surface observed on tested endpoints",
+                "decision_rule": "_rule_html_only_responses",
+                "surface_detected": True,
+                "server_actions_expected": None,
+                "decode_surface_reached": False,
+            },
+            "raw_data": {},
+        },
+    )
+    monkeypatch.setattr(
+        "reactguard.vulnerability_detection.cves._rsc_dec2025_base.run_assessor_with_context",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("Dec 2025 assessor should be skipped when surface is marked missing")),
+    )
+
+    with scan_context(extra={}):
+        result_55182 = CVE202555182VulnerabilityDetector().evaluate("http://example", detection_result=detection)
+        assert result_55182.status == PocStatus.NOT_VULNERABLE
+        assert result_55182.details["decision_rule"] == "_rule_html_only_responses"
+
+        result_55184 = CVE202555184VulnerabilityDetector().evaluate("http://example", detection_result=detection)
+        assert result_55184.status == PocStatus.NOT_VULNERABLE
+        assert result_55184.details["reason_code"] == MISSING_SURFACE_REASON_CODE
+        assert result_55184.details["attack_surface"]["server_functions_surface"] is False
+
+
 def test_waku_entrypoint_missing_is_likely_not_vulnerable(monkeypatch):
     detection = FrameworkDetectionResult(
         tags=[TAG_WAKU, TAG_RSC],
@@ -197,7 +273,7 @@ def test_waku_entrypoint_missing_is_likely_not_vulnerable(monkeypatch):
     )
 
     result = CVE202555182VulnerabilityDetector().evaluate("http://example", detection_result=detection)
-    assert result.status == PocStatus.NOT_APPLICABLE
+    assert result.status == PocStatus.NOT_VULNERABLE
     assert "endpoints" in str(result.details.get("reason") or "").lower()
 
 
@@ -218,5 +294,5 @@ def test_waku_entrypoint_missing_but_expected_is_inconclusive(monkeypatch):
     )
 
     result = CVE202555182VulnerabilityDetector().evaluate("http://example", detection_result=detection)
-    assert result.status == PocStatus.NOT_APPLICABLE
+    assert result.status == PocStatus.INCONCLUSIVE
     assert "endpoints" in str(result.details.get("reason") or "").lower()
