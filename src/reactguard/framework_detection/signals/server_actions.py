@@ -1,35 +1,23 @@
-from __future__ import annotations
-
-"""
-ReactGuard, framework- and vulnerability-detection tooling for CVE-2025-55182 (React2Shell).
-Copyright (C) 2025  Theori Inc.
-
-This program is free software: you can redistribute it and/or modify
-it under the terms of the GNU Affero General Public License as published
-by the Free Software Foundation, either version 3 of the License, or
-(at your option) any later version.
-
-This program is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU Affero General Public License for more details.
-
-You should have received a copy of the GNU Affero General Public License
-along with this program.  If not, see <https://www.gnu.org/licenses/>.
-"""
+# SPDX-FileCopyrightText: 2025 Theori Inc.
+# SPDX-License-Identifier: AGPL-3.0-or-later
 
 """Server Actions probing helpers (httpx-backed)."""
+
+from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urljoin
 
 from ...config import load_http_settings
+from ...http.headers import header_value, normalize_headers
 from ...rsc.payloads import build_multipart_form_payload, build_plaintext_payload
 from ...rsc.send import send_rsc_request
 from ...rsc.types import RscRequestConfig
 from ...utils import TagSet
 from ...utils.actions import generate_action_id
+from ...utils.confidence import confidence_score
+from ...utils.react_major import infer_react_major_from_flight_text, react_major_source_priority
 from ..constants import (
     FRAMEWORK_HTML_MARKERS,
     SERVER_ACTIONS_ACTION_KEYWORDS,
@@ -92,15 +80,23 @@ class ServerActionsSignalApplier:
         supported = bool(probe_result.get("supported"))
         confidence = probe_result.get("confidence") or self.default_confidence
 
-        strong_rsc_signal = has_action_content_type or has_flight_marker or has_digest
+        strong_rsc_signal = has_action_content_type or has_flight_marker or has_digest or (
+            # `Vary: RSC` is a useful hint, but on HTML responses it can be a false positive for
+            # Server Actions (e.g., app/router pages that are RSC-capable but have no actions).
+            (not is_html) and vary_has_rsc and (status not in (404, 405) or action_not_found)
+        )
 
         if self.not_found_signal_key and action_not_found:
             self.signals[self.not_found_signal_key] = True
 
         # Only promote "action not found" when paired with strong RSC evidence; plain 404 text should stay unknown.
+        #
+        # `x-nextjs-action-not-found: 1` is a reliable indicator that the target is Server Actions-capable,
+        # but it does *not* prove a reachable decode surface on this route. Keep confidence at most
+        # medium unless we also see concrete Flight/decode evidence (content-type, Flight rows, digest).
         if action_not_found and strong_rsc_signal:
             supported = True
-            confidence = "high"
+            confidence = "high" if (has_action_content_type or has_flight_marker or has_digest) else "medium"
 
         if not supported:
             if strong_rsc_signal:
@@ -113,9 +109,27 @@ class ServerActionsSignalApplier:
         if flight_format in {"object", "array"} and self.rsc_flight_signal_key:
             self.signals[self.rsc_flight_signal_key] = True
 
-        if self.react_major_signal_key and react_major_from_flight is not None and self.signals.get(self.react_major_signal_key) is None:
-            self.signals[self.react_major_signal_key] = react_major_from_flight
-            self.signals.setdefault(f"{self.react_major_signal_key}_confidence", "medium")
+        if self.react_major_signal_key and react_major_from_flight is not None:
+            key = self.react_major_signal_key
+            new_confidence = "medium"
+            new_source = "flight:server_actions_probe"
+
+            current_confidence = str(self.signals.get(f"{key}_confidence") or "none")
+            current_source = str(self.signals.get(f"{key}_source") or "")
+            current_major = self.signals.get(key)
+
+            should_set = False
+            if current_major is None:
+                should_set = True
+            elif confidence_score(new_confidence) > confidence_score(current_confidence):
+                should_set = True
+            elif confidence_score(new_confidence) == confidence_score(current_confidence) and react_major_source_priority(new_source) > react_major_source_priority(current_source):
+                should_set = True
+
+            if should_set:
+                self.signals[key] = react_major_from_flight
+                self.signals[f"{key}_confidence"] = new_confidence
+                self.signals[f"{key}_source"] = new_source
 
         if self.vary_signal_key and vary_has_rsc:
             self.signals[self.vary_signal_key] = True
@@ -202,7 +216,7 @@ def _probe_server_actions_support_ctx(
         action_id=action_id,
     )
 
-    headers_lower = {k.lower(): v for k, v in (resp.get("headers") or {}).items()}
+    headers_lower = normalize_headers(resp.get("headers"))
     content_type = headers_lower.get("content-type", "").lower()
     vary = headers_lower.get("vary", "").lower()
     body_text = resp.get("body") or resp.get("body_snippet") or ""
@@ -225,41 +239,46 @@ def _probe_server_actions_support_ctx(
     has_framework_html_marker = any(marker in body_lower for marker in FRAMEWORK_HTML_MARKERS)
     has_next_marker = "__next_f" in body_lower or "__next_data__" in body_lower
 
+    react_major_from_flight = infer_react_major_from_flight_text(body_text)
     flight_format = "unknown"
-    react_major_from_flight: int | None = None
-    body_stripped = body_text.lstrip()
-    if body_stripped.startswith("0:{") or '0:[null,["$' in body_text or '0:[null,[\\"$' in body_text:
+    if react_major_from_flight == 19:
         flight_format = "object"
-        react_major_from_flight = 19
-    elif body_stripped.startswith("0:[") or '0:["$' in body_text or '0:[\\"$' in body_text or '0:\\"$L' in body_text:
+    elif react_major_from_flight == 18:
         flight_format = "array"
-        react_major_from_flight = 18
-    elif '"a":"$' in body_text:
-        flight_format = "object"
-        react_major_from_flight = 19
 
+    confidence = "none"
     supported = False
     if resp.get("ok"):
-        strong_rsc_signal = has_action_content_type or has_flight_marker or has_digest
+        # `Vary: RSC` can appear on ordinary Next.js HTML responses when probing with RSC-ish headers.
+        # Treat it as a strong Server Actions signal only when we are *not* looking at an HTML document
+        # (e.g., empty body, plaintext errors, Flight payloads). Otherwise it is too FN/FP-prone.
+        vary_rsc_strong = (not is_html) and vary_has_rsc and (status not in (404, 405) or action_not_found_header or action_not_found_body)
+        strong_rsc_signal = has_action_content_type or has_flight_marker or has_digest or vary_rsc_strong
         keyword_hint = has_strong_action_keywords and (has_action_content_type or has_flight_marker or has_digest or has_framework_html_marker)
         generic_keyword_hint = has_generic_action_keywords and (has_framework_html_marker or has_action_content_type or has_flight_marker)
 
         if strong_rsc_signal:
             supported = True
+            confidence = "high" if (has_action_content_type or has_flight_marker or has_digest) else "medium"
         elif keyword_hint or generic_keyword_hint:
             supported = True
+            confidence = "low"
         elif is_html and has_framework_html_marker and has_action_keywords:
             supported = True
+            confidence = "low"
 
     if not supported and status and status >= 500:
         if has_action_content_type or has_action_keywords or has_framework_html_marker or has_flight_marker or is_html:
             supported = True
+            confidence = "low" if confidence == "none" else confidence
 
     if not supported and status not in (404, 405) and is_html and has_framework_html_marker and (has_action_keywords or has_flight_marker or has_action_content_type):
         supported = True
+        confidence = "low" if confidence == "none" else confidence
 
     return {
         "supported": bool(supported),
+        "confidence": confidence,
         "status_code": status,
         "content_type": content_type,
         "has_action_content_type": has_action_content_type,
@@ -336,9 +355,10 @@ def _detect_server_actions_ctx(
     status_code = scan.get("status_code", 0)
     response_headers = scan.get("headers", {})
     body_text = scan.get("body") or scan.get("body_snippet", "")
-    content_type = response_headers.get("content-type", "")
+    content_type = header_value(response_headers, "content-type")
+    content_type_lower = content_type.lower()
 
-    is_rsc_content_type = SERVER_ACTIONS_RSC_CONTENT_TYPE in content_type
+    is_rsc_content_type = SERVER_ACTIONS_RSC_CONTENT_TYPE in content_type_lower
     has_flight_format = bool(SERVER_ACTIONS_RSC_FLIGHT_PATTERN.match(body_text))
     has_rsc_error = bool(SERVER_ACTIONS_RSC_ERROR_PATTERN.search(body_text))
     is_html = bool(SERVER_ACTIONS_HTML_PATTERN.search(body_text))

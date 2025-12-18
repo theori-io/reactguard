@@ -1,24 +1,9 @@
-from __future__ import annotations
-
-"""
-ReactGuard, framework- and vulnerability-detection tooling for CVE-2025-55182 (React2Shell).
-Copyright (C) 2025  Theori Inc.
-
-This program is free software: you can redistribute it and/or modify
-it under the terms of the GNU Affero General Public License as published
-by the Free Software Foundation, either version 3 of the License, or
-(at your option) any later version.
-
-This program is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU Affero General Public License for more details.
-
-You should have received a copy of the GNU Affero General Public License
-along with this program.  If not, see <https://www.gnu.org/licenses/>.
-"""
+# SPDX-FileCopyrightText: 2025 Theori Inc.
+# SPDX-License-Identifier: AGPL-3.0-or-later
 
 """Framework detection orchestrator."""
+
+from __future__ import annotations
 
 import logging
 from typing import Any
@@ -27,11 +12,12 @@ from ..http import (
     HttpRequest,
     create_default_http_client,
     get_http_client,
+    normalize_headers,
     send_with_retries,
 )
 from ..http.client import HttpClient
 from ..models import FrameworkDetectionResult, ScanRequest
-from ..utils import TagSet, extract_versions
+from ..utils import TagSet, confidence_score, extract_versions, parse_semver
 from ..utils.context import get_scan_context, scan_context
 from .base import DetectionContext
 from .keys import (
@@ -62,12 +48,22 @@ class FrameworkDetectionEngine:
 
     def detect(self, request: ScanRequest) -> FrameworkDetectionResult:
         context = get_scan_context()
-        if context.http_client is None:
-            with scan_context(
-                http_client=self.http_client,
-                proxy_profile=request.proxy_profile,
-                correlation_id=request.correlation_id,
-            ):
+        needs_http_client = context.http_client is None
+        needs_extra = not isinstance(context.extra, dict)
+
+        if needs_http_client or needs_extra:
+            overrides: dict[str, Any] = {}
+            if needs_http_client:
+                overrides.update(
+                    {
+                        "http_client": self.http_client,
+                        "proxy_profile": request.proxy_profile,
+                        "correlation_id": request.correlation_id,
+                    }
+                )
+            if needs_extra:
+                overrides["extra"] = {}
+            with scan_context(**overrides):
                 return self._detect_ctx(request)
         return self._detect_ctx(request)
 
@@ -85,6 +81,7 @@ class FrameworkDetectionEngine:
         self._run_detectors(body, headers, tags, signals, context)
         self._apply_confidence(signals)
         self._apply_rsc_flags(tags, signals)
+        self._annotate_react_major_evidence(signals)
 
         return FrameworkDetectionResult(tags=tags.to_list(), signals=signals)
 
@@ -119,13 +116,13 @@ class FrameworkDetectionEngine:
 
     @staticmethod
     def _normalize_headers(request: ScanRequest, response) -> dict[str, str]:
-        raw_headers: dict[str, str] = {}
+        raw_headers: dict[object, object] = {}
         if request.response_headers:
             raw_headers.update(request.response_headers)
         if response and response.headers:
             # Response headers should take precedence over any offline overrides.
             raw_headers.update(response.headers)
-        return {k.lower(): v for k, v in raw_headers.items()}
+        return normalize_headers(raw_headers)
 
     @staticmethod
     def _resolve_body(request: ScanRequest, response) -> str:
@@ -179,3 +176,120 @@ class FrameworkDetectionEngine:
             signals[SIG_RSC_DEPENDENCY_ONLY] = True
         if has_react_bundle and not has_rsc_endpoint and not has_rsc_runtime:
             signals[SIG_REACT_BUNDLE_ONLY] = True
+
+    @staticmethod
+    def _annotate_react_major_evidence(signals: dict[str, Any]) -> None:
+        """
+        Attach machine-readable evidence for React major inference.
+
+        This makes major selection auditable and enables downstream CVE logic to downgrade
+        when evidence sources disagree.
+        """
+        evidence: list[dict[str, Any]] = []
+
+        def _add_major_evidence(
+            *,
+            major_key: str,
+            source_key: str,
+            confidence_key: str,
+            default_source: str,
+        ) -> None:
+            raw = signals.get(major_key)
+            if raw is None:
+                return
+            try:
+                major = int(raw)
+            except (TypeError, ValueError):
+                return
+            evidence.append(
+                {
+                    "major": major,
+                    "signal": major_key,
+                    "source": str(signals.get(source_key) or default_source),
+                    "confidence": str(signals.get(confidence_key) or "none"),
+                }
+            )
+
+        def _add_version_evidence(
+            *,
+            version_key: str,
+            source_key: str,
+            confidence_key: str,
+            default_source: str,
+        ) -> None:
+            version = signals.get(version_key)
+            if not version:
+                return
+            parsed = parse_semver(str(version))
+            if not parsed:
+                return
+            evidence.append(
+                {
+                    "major": parsed.major,
+                    "signal": version_key,
+                    "version": str(version),
+                    "source": str(signals.get(source_key) or default_source),
+                    "confidence": str(signals.get(confidence_key) or "none"),
+                }
+            )
+
+        # Order: prefer runtime version markers, then explicit React version, then major-only heuristics.
+        _add_version_evidence(
+            version_key="detected_rsc_runtime_version",
+            source_key="detected_rsc_runtime_version_source",
+            confidence_key="detected_rsc_runtime_version_confidence",
+            default_source="detected_rsc_runtime_version",
+        )
+        _add_version_evidence(
+            version_key="detected_react_version",
+            source_key="detected_react_version_source",
+            confidence_key="detected_react_version_confidence",
+            default_source="detected_react_version",
+        )
+        _add_major_evidence(
+            major_key="detected_react_major",
+            source_key="detected_react_major_source",
+            confidence_key="detected_react_major_confidence",
+            default_source="detected_react_major",
+        )
+
+        _add_version_evidence(
+            version_key="bundle_rsc_runtime_version",
+            source_key="bundle_rsc_runtime_version_source",
+            confidence_key="bundle_rsc_runtime_version_confidence",
+            default_source="bundle_rsc_runtime_version",
+        )
+        _add_version_evidence(
+            version_key="bundle_react_version",
+            source_key="bundle_react_version_source",
+            confidence_key="bundle_react_version_confidence",
+            default_source="bundle_react_version",
+        )
+        _add_major_evidence(
+            major_key="bundle_react_major",
+            source_key="bundle_react_major_source",
+            confidence_key="bundle_react_major_confidence",
+            default_source="bundle_react_major",
+        )
+
+        if not evidence:
+            return
+
+        signals["react_major_evidence"] = evidence
+
+        strong_majors = {
+            item["major"]
+            for item in evidence
+            if confidence_score(str(item.get("confidence") or "none")) >= confidence_score("medium")
+        }
+        if len(strong_majors) > 1:
+            signals["react_major_conflict"] = True
+            signals["react_major_conflict_confidence"] = "high"
+            signals["react_major_conflict_majors"] = sorted(strong_majors)
+            return
+
+        all_majors = {item["major"] for item in evidence}
+        signals["react_major_conflict"] = len(all_majors) > 1
+        signals["react_major_conflict_confidence"] = "low" if signals["react_major_conflict"] else "none"
+        if signals["react_major_conflict"]:
+            signals["react_major_conflict_majors"] = sorted(all_majors)

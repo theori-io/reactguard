@@ -1,30 +1,16 @@
-from __future__ import annotations
-
-"""
-ReactGuard, framework- and vulnerability-detection tooling for CVE-2025-55182 (React2Shell).
-Copyright (C) 2025  Theori Inc.
-
-This program is free software: you can redistribute it and/or modify
-it under the terms of the GNU Affero General Public License as published
-by the Free Software Foundation, either version 3 of the License, or
-(at your option) any later version.
-
-This program is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU Affero General Public License for more details.
-
-You should have received a copy of the GNU Affero General Public License
-along with this program.  If not, see <https://www.gnu.org/licenses/>.
-"""
+# SPDX-FileCopyrightText: 2025 Theori Inc.
+# SPDX-License-Identifier: AGPL-3.0-or-later
 
 """Lightweight JS-module parsing and same-origin crawling helpers."""
+
+from __future__ import annotations
 
 import re
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from urllib.parse import urljoin, urlparse
 
+from .headers import header_value
 from .url import build_base_dir_url, build_endpoint_candidates, same_origin
 
 _JS_IMPORT_FROM_PATTERN = re.compile(
@@ -47,7 +33,7 @@ class CrawledJsModule:
 
 def looks_like_html_response(headers: Mapping[str, object] | None, body: str) -> bool:
     headers = headers or {}
-    content_type = str(headers.get("content-type") or "").lower()
+    content_type = header_value(headers, "content-type").lower()
     if "text/html" in content_type:
         return True
     lowered = str(body or "").lstrip().lower()

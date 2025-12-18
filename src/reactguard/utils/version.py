@@ -1,26 +1,12 @@
-"""
-ReactGuard, framework- and vulnerability-detection tooling for CVE-2025-55182 (React2Shell).
-Copyright (C) 2025  Theori Inc.
-
-This program is free software: you can redistribute it and/or modify
-it under the terms of the GNU Affero General Public License as published
-by the Free Software Foundation, either version 3 of the License, or
-(at your option) any later version.
-
-This program is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU Affero General Public License for more details.
-
-You should have received a copy of the GNU Affero General Public License
-along with this program.  If not, see <https://www.gnu.org/licenses/>.
-"""
+# SPDX-FileCopyrightText: 2025 Theori Inc.
+# SPDX-License-Identifier: AGPL-3.0-or-later
 
 """Version parsing and extraction utilities."""
 
 import logging
 import re
 from dataclasses import dataclass
+from functools import lru_cache
 from typing import Any
 
 from .confidence import confidence_label, confidence_score
@@ -32,6 +18,11 @@ from .version_thresholds import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+@lru_cache(maxsize=64)
+def _compiled_pattern(pattern: str, flags: int) -> re.Pattern[str]:
+    return re.compile(pattern, flags)
 
 
 @dataclass
@@ -153,10 +144,20 @@ class VersionPatterns:
     REACT_VERSION_ASSIGN = re.compile(rf'\bversion\s*=\s*"({SEMVER_PATTERN})"')
 
 
-def extract_versions(headers: dict[str, str], body: str) -> dict[str, Any]:
+def extract_versions(headers: dict[str, str], body: str, *, case_sensitive_body: bool = False) -> dict[str, Any]:
     versions: dict[str, Any] = {}
+    # Be defensive: some callers may pass non-normalized header dicts.
+    headers = {str(k).lower(): str(v) for k, v in (headers or {}).items() if k is not None}
     body = body or ""
-    body_lower = body.lower()
+    body_lower = None if case_sensitive_body else body.lower()
+
+    def _search(pattern: re.Pattern[str], text: str) -> re.Match[str] | None:
+        flags = pattern.flags & ~re.IGNORECASE if case_sensitive_body else pattern.flags
+        return _compiled_pattern(pattern.pattern, flags).search(text)
+
+    def _finditer(pattern: re.Pattern[str], text: str):
+        flags = pattern.flags & ~re.IGNORECASE if case_sensitive_body else pattern.flags
+        return _compiled_pattern(pattern.pattern, flags).finditer(text)
 
     def _maybe_set_version(key: str, value: str, source: str, confidence: str) -> None:
         """Set a version value with source/confidence, preferring stronger confidence."""
@@ -182,20 +183,20 @@ def extract_versions(headers: dict[str, str], body: str) -> dict[str, Any]:
     if waku_ver:
         _maybe_set_version("waku_version", waku_ver, "header", "high")
 
-    rsc_flight_match = VersionPatterns.RSC_FLIGHT_IMPORT.search(body)
+    rsc_flight_match = _search(VersionPatterns.RSC_FLIGHT_IMPORT, body)
     if rsc_flight_match:
         value = rsc_flight_match.group(1)
         _maybe_set_version("rsc_runtime_version", value, "rsc_flight", "high")
         _maybe_set_version("react_version", value, "rsc_flight", "high")
         versions["rsc_flight_version_source"] = "I_chunk"
 
-    rsc_runtime = VersionPatterns.RSC_RUNTIME_PACKAGE.search(body)
+    rsc_runtime = _search(VersionPatterns.RSC_RUNTIME_PACKAGE, body)
     if rsc_runtime:
         value = rsc_runtime.group(1)
         _maybe_set_version("rsc_runtime_version", value, "rsc_runtime_package", "high")
 
     if "react_version" not in versions:
-        core_react_match = VersionPatterns.CORE_REACT_PACKAGE.search(body)
+        core_react_match = _search(VersionPatterns.CORE_REACT_PACKAGE, body)
         if core_react_match:
             _maybe_set_version("react_version", core_react_match.group(1), "core_package", "high")
 
@@ -208,21 +209,30 @@ def extract_versions(headers: dict[str, str], body: str) -> dict[str, Any]:
         )
 
     if "react_version" not in versions:
-        react_match = VersionPatterns.REACT_PACKAGE.search(body)
+        react_match = _search(VersionPatterns.REACT_PACKAGE, body)
         if react_match:
             _maybe_set_version("react_version", react_match.group(1), "package_literal", "medium")
 
     if "react_version" not in versions:
-        manifest_match = VersionPatterns.REACT_MANIFEST.search(body)
+        manifest_match = _search(VersionPatterns.REACT_MANIFEST, body)
         if manifest_match:
             _maybe_set_version("react_version", manifest_match.group(1), "manifest", "medium")
 
     if "react_version" not in versions:
-        plain_match = VersionPatterns.REACT_PLAIN.search(body)
+        plain_match = _search(VersionPatterns.REACT_PLAIN, body)
         if plain_match:
             _maybe_set_version("react_version", plain_match.group(1), "plain_text", "low")
 
-    if "react_version" not in versions and ("react/jsx-runtime" in body or "react-dom" in body_lower or "react-server-dom" in body_lower or "react.dev/errors/" in body_lower):
+    react_hint_body = body if case_sensitive_body else (body_lower or "")
+    if (
+        "react_version" not in versions
+        and (
+            "react/jsx-runtime" in react_hint_body
+            or "react-dom" in react_hint_body
+            or "react-server-dom" in react_hint_body
+            or "react.dev/errors/" in react_hint_body
+        )
+    ):
         # Fall back to the React.version string embedded in many bundled React builds.
         #
         # Guardrails:
@@ -231,14 +241,15 @@ def extract_versions(headers: dict[str, str], body: str) -> dict[str, Any]:
         best_candidate: str | None = None
         best_rank: tuple[int, int, int, int] | None = None
 
-        for match in VersionPatterns.REACT_VERSION_ASSIGN.finditer(body):
+        for match in _finditer(VersionPatterns.REACT_VERSION_ASSIGN, body):
             candidate = match.group(1)
             parsed = parse_semver(candidate)
             if not parsed or parsed.major < 18:
                 continue
 
-            window = body[max(0, match.start() - 160) : min(len(body), match.end() + 160)].lower()
-            if "canary-full" in window or "node_modules/@expo/cli/static" in window or "@expo/cli/static" in window:
+            window = body[max(0, match.start() - 160) : min(len(body), match.end() + 160)]
+            window_check = window if case_sensitive_body else window.lower()
+            if "canary-full" in window_check or "node_modules/@expo/cli/static" in window_check or "@expo/cli/static" in window_check:
                 continue
 
             suffix = str(parsed.suffix or "").lower()
@@ -260,31 +271,31 @@ def extract_versions(headers: dict[str, str], body: str) -> dict[str, Any]:
             _maybe_set_version("react_version", best_candidate, "bundle_assign", "medium")
 
     if "next_version" not in versions:
-        next_literal = VersionPatterns.NEXT_LITERAL.search(body)
+        next_literal = _search(VersionPatterns.NEXT_LITERAL, body)
         if next_literal:
             _maybe_set_version("next_version", next_literal.group(1), "package_literal", "medium")
 
     if "next_version" not in versions:
-        next_manifest = VersionPatterns.NEXT_MANIFEST.search(body)
+        next_manifest = _search(VersionPatterns.NEXT_MANIFEST, body)
         if next_manifest:
             _maybe_set_version("next_version", next_manifest.group(1), "manifest", "medium")
 
     if "next_version" not in versions:
-        plain_next = VersionPatterns.NEXT_PLAIN.search(body)
+        plain_next = _search(VersionPatterns.NEXT_PLAIN, body)
         if plain_next:
             _maybe_set_version("next_version", plain_next.group(1), "plain_text", "low")
 
     if "waku_version" not in versions:
-        waku_literal = VersionPatterns.WAKU_LITERAL.search(body)
+        waku_literal = _search(VersionPatterns.WAKU_LITERAL, body)
         if waku_literal:
             _maybe_set_version("waku_version", waku_literal.group(1), "package_literal", "medium")
 
     if "waku_version" not in versions:
-        waku_plain = VersionPatterns.WAKU_PLAIN.search(body_lower)
+        waku_plain = _search(VersionPatterns.WAKU_PLAIN, body if case_sensitive_body else (body_lower or ""))
         if waku_plain:
             _maybe_set_version("waku_version", waku_plain.group(1), "plain_text", "low")
 
-    rr_match = VersionPatterns.REACT_ROUTER_VERSION.search(body)
+    rr_match = _search(VersionPatterns.REACT_ROUTER_VERSION, body)
     if rr_match:
         _maybe_set_version("react_router_version", rr_match.group(1), "bundle_literal", "high")
 
@@ -294,6 +305,8 @@ def extract_versions(headers: dict[str, str], body: str) -> dict[str, Any]:
             try:
                 versions["react_major"] = int(react_ver.split(".")[0])
                 versions["react_major_confidence"] = versions.get("react_version_confidence", "medium")
+                if versions.get("react_version_source"):
+                    versions["react_major_source"] = f"derived:{versions.get('react_version_source')}"
             except ValueError:
                 logger.debug("Could not parse React major from: %s", react_ver)
 

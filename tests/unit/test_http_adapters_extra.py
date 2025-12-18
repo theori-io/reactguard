@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2025 Theori Inc.
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 from reactguard.http.adapters import StubHttpClient, WorkerHttpClientAdapter
 from reactguard.http.models import HttpRequest, HttpResponse
 

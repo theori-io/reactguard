@@ -1,24 +1,9 @@
-from __future__ import annotations
-
-"""
-ReactGuard, framework- and vulnerability-detection tooling for CVE-2025-55182 (React2Shell).
-Copyright (C) 2025  Theori Inc.
-
-This program is free software: you can redistribute it and/or modify
-it under the terms of the GNU Affero General Public License as published
-by the Free Software Foundation, either version 3 of the License, or
-(at your option) any later version.
-
-This program is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU Affero General Public License for more details.
-
-You should have received a copy of the GNU Affero General Public License
-along with this program.  If not, see <https://www.gnu.org/licenses/>.
-"""
+# SPDX-FileCopyrightText: 2025 Theori Inc.
+# SPDX-License-Identifier: AGPL-3.0-or-later
 
 """Crawl-lite helpers (same-origin, GET-only) used for safe discovery."""
+
+from __future__ import annotations
 
 from collections import deque
 from dataclasses import dataclass
@@ -27,6 +12,7 @@ from typing import Any
 from urllib.parse import urljoin, urlparse
 
 from ..config import load_http_settings
+from .headers import header_value
 from .models import HttpRequest, RetryConfig
 from .retry import send_with_retries
 from .utils import get_http_client
@@ -86,7 +72,7 @@ def _scan_once(
 
 def _looks_like_html(resp: dict[str, Any]) -> bool:
     headers = resp.get("headers") or {}
-    content_type = str(headers.get("content-type") or "").lower()
+    content_type = header_value(headers, "content-type").lower()
     if "text/html" in content_type:
         return True
     body = str(resp.get("body") or resp.get("body_snippet") or "").lstrip()

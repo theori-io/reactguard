@@ -1,4 +1,8 @@
+# SPDX-FileCopyrightText: 2025 Theori Inc.
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 from reactguard.framework_detection.signals import bundle, expo_server_functions, react_router_server_functions, rsc, server_actions, waku
+from reactguard.utils.context import scan_context
 from reactguard.utils.tag_manager import TagSet
 
 
@@ -26,6 +30,43 @@ def test_probe_js_bundles_detects_router(monkeypatch):
     signals = bundle.probe_js_bundles("http://example", '<script src="/_next/static/chunk.js"></script>')
     assert signals["react_router_v7_bundle"] is True
     assert calls
+
+
+def test_probe_js_bundles_derives_react_major_from_selected_version(monkeypatch):
+    """
+    When multiple bundles embed different `react@x.y.z` literals at equal confidence,
+    `probe_js_bundles()` should keep `bundle_react_major` consistent with the chosen
+    `bundle_react_version` (avoid flakiness across bundle ordering/failures).
+    """
+
+    def fake_scan(url, **kwargs):  # noqa: ARG001
+        if url.endswith("a.js"):
+            return {"ok": True, "status_code": 200, "body": "react@18.2.0", "headers": {}}
+        if url.endswith("b.js"):
+            return {"ok": True, "status_code": 200, "body": "react@19.2.0", "headers": {}}
+        return {"ok": False, "status_code": 404, "body": "", "headers": {}}
+
+    monkeypatch.setattr(bundle, "request_with_retries", fake_scan)
+    html = '<script src="/a.js"></script><script src="/b.js"></script>'
+    signals = bundle.probe_js_bundles("http://example", html)
+    assert signals["bundle_react_version"] == "19.2.0"
+    assert signals["bundle_react_major"] == 19
+
+
+def test_probe_js_bundles_caches_within_scan(monkeypatch):
+    calls = []
+
+    def fake_scan(url, **kwargs):  # noqa: ARG001
+        calls.append(url)
+        return {"ok": True, "status_code": 200, "body": "react@19.0.0", "headers": {}}
+
+    monkeypatch.setattr(bundle, "request_with_retries", fake_scan)
+    html = '<script src="/a.js"></script>'
+    with scan_context(extra={}):
+        first = bundle.probe_js_bundles("http://example", html)
+        second = bundle.probe_js_bundles("http://example", html)
+    assert first == second
+    assert len(calls) == 1
 
 
 def test_discover_react_router_server_functions_extracts_ids_and_endpoints():
@@ -142,6 +183,41 @@ def test_probe_server_actions_support_reads_rsc(monkeypatch):
     assert result["has_flight_marker"] is True
 
 
+def test_probe_server_actions_support_uses_vary_rsc_when_body_is_empty(monkeypatch):
+    monkeypatch.setattr(
+        server_actions,
+        "send_rsc_request",
+        lambda *_, **__: {
+            "ok": True,
+            "status_code": 200,
+            "headers": {"vary": "RSC"},
+            "body": "",
+            "body_snippet": "",
+        },
+    )
+    result = server_actions.probe_server_actions_support("http://example")
+    assert result["supported"] is True
+    assert result["confidence"] in {"medium", "high"}
+    assert result["vary_has_rsc"] is True
+
+
+def test_probe_server_actions_support_does_not_use_vary_rsc_on_404(monkeypatch):
+    monkeypatch.setattr(
+        server_actions,
+        "send_rsc_request",
+        lambda *_, **__: {
+            "ok": True,
+            "status_code": 404,
+            "headers": {"vary": "RSC", "content-type": "text/plain"},
+            "body": "Not Found",
+            "body_snippet": "Not Found",
+        },
+    )
+    result = server_actions.probe_server_actions_support("http://example")
+    assert result["supported"] is False
+    assert result["vary_has_rsc"] is True
+
+
 def test_apply_server_actions_probe_results_sets_tags():
     tags = TagSet()
     signals = {}
@@ -190,7 +266,16 @@ def test_probe_waku_rsc_surface_and_minimal_html(monkeypatch):
 
     monkeypatch.setattr(waku, "request_with_retries", fake_scan)
     assert waku.probe_waku_rsc_surface("http://example")
-    minimal_body = '<html><body><script>import("/assets/index.js")</script></body></html>'
+    minimal_body = """
+    <html>
+      <head></head>
+      <body>
+        <script type="module">
+          import("/assets/index.js")
+        </script>
+      </body>
+    </html>
+    """
     assert waku.probe_waku_minimal_html(minimal_body, "http://example")
 
 

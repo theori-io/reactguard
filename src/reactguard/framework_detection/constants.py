@@ -1,20 +1,5 @@
-"""
-ReactGuard, framework- and vulnerability-detection tooling for CVE-2025-55182 (React2Shell).
-Copyright (C) 2025  Theori Inc.
-
-This program is free software: you can redistribute it and/or modify
-it under the terms of the GNU Affero General Public License as published
-by the Free Software Foundation, either version 3 of the License, or
-(at your option) any later version.
-
-This program is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU Affero General Public License for more details.
-
-You should have received a copy of the GNU Affero General Public License
-along with this program.  If not, see <https://www.gnu.org/licenses/>.
-"""
+# SPDX-FileCopyrightText: 2025 Theori Inc.
+# SPDX-License-Identifier: AGPL-3.0-or-later
 
 """Shared framework detection constants and markers."""
 
@@ -39,10 +24,16 @@ NEXTJS_NEXT_F_PATTERN = re.compile(r"self\.__next_f|__next_f\.push|__next_f=")
 NEXTJS_STATIC_PATH_PATTERN = re.compile(r"/_next/static/")
 NEXTJS_CHUNK_PATTERN = re.compile(r"/_next/static/chunks/[a-zA-Z0-9_-]+(-[a-f0-9]+)?\.js")
 NEXTJS_MANIFEST_PATTERN = re.compile(r"_buildManifest\.js")
-NEXTJS_RSC_FLIGHT_PATTERN_V19_HTML = '0:[null,["$"'
-NEXTJS_RSC_FLIGHT_PATTERN_V19_HTML_ESCAPED = '0:[null,[\\"$"'
+# React 19+ Flight payloads encode the root segment (`0:`) as an object.
+# NOTE: Avoid using overly-generic markers like `0:{` for *HTML* detection; prefer escaped/structured
+# patterns (e.g. `0:{\\\"`) and/or framework-specific hydration markers to reduce false positives.
+NEXTJS_RSC_FLIGHT_PATTERN_V19_HTML_ESCAPED = '0:{\\"'
 NEXTJS_RSC_FLIGHT_PATTERN_V19_OBJECT = '0:{"a":"$@'
 NEXTJS_RSC_FLIGHT_PATTERN_V19_OBJECT_ESCAPED = '0:{\\"a\\":\\"$@'
+# React 18 Flight payloads sometimes wrap the array root segment, e.g.:
+#   0:[null,["$","$L1",...]]
+NEXTJS_RSC_FLIGHT_PATTERN_V18_WRAPPED = '0:[null,["$"'
+NEXTJS_RSC_FLIGHT_PATTERN_V18_WRAPPED_ESCAPED = '0:[null,[\\"$"'
 NEXTJS_RSC_FLIGHT_PATTERN_V18_HTML = re.compile(r'^\s*0:\["\$","\$L', re.MULTILINE)
 NEXTJS_RSC_FLIGHT_PATTERN_V18_HTML_ESCAPED = re.compile(r'^\s*0:\[\\"\\$\\",\\"\$L', re.MULTILINE)
 NEXTJS_RSC_FLIGHT_PATTERN_V18_SIMPLE = re.compile(r'^\s*0:"\$L', re.MULTILINE)
@@ -79,8 +70,8 @@ WAKU_ACTION_ID_PATTERN_V025 = re.compile(r"([a-f0-9]{8,64})#([\w$-]+)", re.IGNOR
 WAKU_ACTION_ID_PATTERN_V021 = re.compile(r"@id/([^#]+)#([\w$-]+)")
 WAKU_CREATE_SERVER_REF_PATTERN = re.compile(r'createServerReference\(["\']([^"#]+)#([\w$-]+)')
 WAKU_MINIMAL_HTML_PATTERN = re.compile(
-    r'^<html><body><script>import\(["\'][^"\']+["\']\)</script></body></html>$',
-    re.IGNORECASE,
+    r'^\s*<html[^>]*>\s*(?:<head[^>]*>.*?</head>\s*)?<body[^>]*>\s*<script[^>]*>\s*import\(\s*["\'][^"\']+["\']\s*\)\s*</script>\s*</body>\s*</html>\s*$',
+    re.IGNORECASE | re.DOTALL,
 )
 # Note: order matters here (`tsx` before `ts`, `jsx` before `js`) so we don't truncate matches like `.tsx` -> `.ts`.
 WAKU_JS_FALLBACK_PATTERN = re.compile(r'/(?:assets|src)/[^"\']+\.(?:tsx|ts|jsx|js|mjs|cjs)')
@@ -98,13 +89,14 @@ GENERIC_FLIGHT_PAYLOAD_PATTERN = re.compile(r'^\d+:(?:\["\$|\{\s*"a"\s*:\s*"\$|\
 GENERIC_FRAGMENT_PATTERN = re.compile(r"^\$[A-Z]", re.MULTILINE)
 
 # SPA detection markers.
-SPA_MOUNT_POINT_PATTERN = re.compile(r'id="(root|app)"|data-reactroot')
+SPA_MOUNT_POINT_PATTERN = re.compile(r"id=['\"](?:root|app)['\"]|data-reactroot", re.IGNORECASE)
+SPA_SCRIPT_MODULE_PATTERN = re.compile(r"<script[^>]*\btype\s*=\s*(?:['\"]module['\"]|module)", re.IGNORECASE)
 SPA_VITE_ASSETS_PATTERN = re.compile(r"/assets/[a-zA-Z0-9_-]+[.-][a-f0-9]+\.js")
 SPA_MODULEPRELOAD_PATTERN = re.compile(r'rel=["\']modulepreload["\']\s+href=["\']/assets/[^\s"\']+\.js')
 
 # RSC probe markers.
 RSC_PROBE_FLIGHT_BODY_PATTERN = re.compile(
-    r'^0:(?:\["\$|\[null,\["\$|\{"a"\s*:\s*"\$|I\["react-server-dom-)',
+    r'^0:(?:\["\$|\[null,\["\$|\{|I\["react-server-dom-)',
     re.IGNORECASE,
 )
 

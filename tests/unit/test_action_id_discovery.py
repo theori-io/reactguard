@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2025 Theori Inc.
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 from reactguard.http.crawl import CrawledPage
 from reactguard.vulnerability_detection.probes import rsc_patch_fingerprint_probe as probe
 

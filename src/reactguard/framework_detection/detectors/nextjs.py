@@ -1,26 +1,13 @@
-"""
-ReactGuard, framework- and vulnerability-detection tooling for CVE-2025-55182 (React2Shell).
-Copyright (C) 2025  Theori Inc.
-
-This program is free software: you can redistribute it and/or modify
-it under the terms of the GNU Affero General Public License as published
-by the Free Software Foundation, either version 3 of the License, or
-(at your option) any later version.
-
-This program is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU Affero General Public License for more details.
-
-You should have received a copy of the GNU Affero General Public License
-along with this program.  If not, see <https://www.gnu.org/licenses/>.
-"""
+# SPDX-FileCopyrightText: 2025 Theori Inc.
+# SPDX-License-Identifier: AGPL-3.0-or-later
 
 """Next.js framework detector."""
 
 from typing import Any
 
 from ...utils import TagSet
+from ...utils.confidence import confidence_score
+from ...utils.react_major import react_major_source_priority
 from ..base import DetectionContext, FrameworkDetector
 from ..constants import (
     NEXTJS_CHUNK_PATTERN,
@@ -31,7 +18,8 @@ from ..constants import (
     NEXTJS_RSC_FLIGHT_PATTERN_V18_HTML_ESCAPED,
     NEXTJS_RSC_FLIGHT_PATTERN_V18_SIMPLE,
     NEXTJS_RSC_FLIGHT_PATTERN_V18_SIMPLE_ESCAPED,
-    NEXTJS_RSC_FLIGHT_PATTERN_V19_HTML,
+    NEXTJS_RSC_FLIGHT_PATTERN_V18_WRAPPED,
+    NEXTJS_RSC_FLIGHT_PATTERN_V18_WRAPPED_ESCAPED,
     NEXTJS_RSC_FLIGHT_PATTERN_V19_HTML_ESCAPED,
     NEXTJS_RSC_FLIGHT_PATTERN_V19_OBJECT,
     NEXTJS_RSC_FLIGHT_PATTERN_V19_OBJECT_ESCAPED,
@@ -63,12 +51,13 @@ class NextJSDetector(FrameworkDetector):
         if not body:
             return None
         if (
-            NEXTJS_RSC_FLIGHT_PATTERN_V19_HTML in body
-            or NEXTJS_RSC_FLIGHT_PATTERN_V19_HTML_ESCAPED in body
+            NEXTJS_RSC_FLIGHT_PATTERN_V19_HTML_ESCAPED in body
             or NEXTJS_RSC_FLIGHT_PATTERN_V19_OBJECT in body
             or NEXTJS_RSC_FLIGHT_PATTERN_V19_OBJECT_ESCAPED in body
         ):
             return 19
+        if NEXTJS_RSC_FLIGHT_PATTERN_V18_WRAPPED in body or NEXTJS_RSC_FLIGHT_PATTERN_V18_WRAPPED_ESCAPED in body:
+            return 18
         if (
             NEXTJS_RSC_FLIGHT_PATTERN_V18_HTML.search(body)
             or NEXTJS_RSC_FLIGHT_PATTERN_V18_HTML_ESCAPED.search(body)
@@ -148,8 +137,10 @@ class NextJSDetector(FrameworkDetector):
         if is_nextjs:
             tags.add(TAG_NEXTJS)
 
-        if signals.get("detected_react_major") is None:
-            react_major = self._react_major_from_flight(page_body)
+        # Avoid React-major inference from arbitrary HTML/JS that happens to contain
+        # Flight-looking substrings. Only attempt this once we've positively identified Next.js.
+        react_major = self._react_major_from_flight(page_body) if is_nextjs else None
+        if react_major is not None:
             detected_react_version = signals.get("detected_react_version")
             detected_react_version_major = None
             if detected_react_version:
@@ -159,8 +150,26 @@ class NextJSDetector(FrameworkDetector):
                     detected_react_version_major = None
 
             if react_major == 19 or (react_major == 18 and detected_react_version_major is None):
-                signals["detected_react_major"] = react_major
-                signals.setdefault("detected_react_major_confidence", "medium")
+                key = "detected_react_major"
+                new_confidence = "medium"
+                new_source = "flight:nextjs_html"
+
+                current_confidence = str(signals.get(f"{key}_confidence") or "none")
+                current_source = str(signals.get(f"{key}_source") or "")
+                current_major = signals.get(key)
+
+                should_set = False
+                if current_major is None:
+                    should_set = True
+                elif confidence_score(new_confidence) > confidence_score(current_confidence):
+                    should_set = True
+                elif confidence_score(new_confidence) == confidence_score(current_confidence) and react_major_source_priority(new_source) > react_major_source_priority(current_source):
+                    should_set = True
+
+                if should_set:
+                    signals[key] = react_major
+                    signals[f"{key}_confidence"] = new_confidence
+                    signals[f"{key}_source"] = new_source
 
         # Only promote to App Router when we have RSC markers or action support
         if signals.get(SIG_SERVER_ACTIONS_ENABLED) or signals.get(SIG_RSC_ENDPOINT_FOUND) or signals.get(SIG_RSC_CONTENT_TYPE):

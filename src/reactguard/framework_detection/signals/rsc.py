@@ -1,20 +1,5 @@
-"""
-ReactGuard, framework- and vulnerability-detection tooling for CVE-2025-55182 (React2Shell).
-Copyright (C) 2025  Theori Inc.
-
-This program is free software: you can redistribute it and/or modify
-it under the terms of the GNU Affero General Public License as published
-by the Free Software Foundation, either version 3 of the License, or
-(at your option) any later version.
-
-This program is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU Affero General Public License for more details.
-
-You should have received a copy of the GNU Affero General Public License
-along with this program.  If not, see <https://www.gnu.org/licenses/>.
-"""
+# SPDX-FileCopyrightText: 2025 Theori Inc.
+# SPDX-License-Identifier: AGPL-3.0-or-later
 
 """RSC endpoint and server action probing."""
 
@@ -22,6 +7,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from ...http import request_with_retries
+from ...http.headers import normalize_headers
 from ...utils import TagSet
 from ..constants import RSC_PROBE_FLIGHT_BODY_PATTERN
 from ..keys import SIG_RSC_ENDPOINT_FOUND, SIG_SERVER_ACTIONS_CONFIDENCE, SIG_SERVER_ACTIONS_ENABLED
@@ -83,7 +69,7 @@ def _probe_rsc_endpoint_ctx(endpoint_url: str) -> bool:
     if not resp.get("ok") or resp.get("status_code") != 200:
         return False
 
-    resp_headers = {k.lower(): v for k, v in (resp.get("headers") or {}).items()}
+    resp_headers = normalize_headers(resp.get("headers"))
     resp_body = (resp.get("body") or resp.get("body_snippet") or "").strip()
 
     if resp_headers.get("content-type", "").startswith("text/x-component"):

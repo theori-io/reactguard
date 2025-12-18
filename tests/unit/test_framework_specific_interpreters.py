@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2025 Theori Inc.
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 from reactguard.models.poc import PocStatus
 from reactguard.vulnerability_detection.interpreters.expo_interpreter import ExpoInterpreter
 from reactguard.vulnerability_detection.interpreters.react_router_interpreter import ReactRouterInterpreter

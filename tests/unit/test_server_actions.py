@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2025 Theori Inc.
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 from reactguard.framework_detection.signals import server_actions
 from reactguard.utils.tag_manager import TagSet
 

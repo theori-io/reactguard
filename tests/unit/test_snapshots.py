@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2025 Theori Inc.
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 from reactguard.models import FrameworkDetectionResult
 from reactguard.vulnerability_detection.snapshots import DetectionSnapshot
 

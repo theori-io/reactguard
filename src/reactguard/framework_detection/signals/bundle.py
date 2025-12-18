@@ -1,20 +1,5 @@
-"""
-ReactGuard, framework- and vulnerability-detection tooling for CVE-2025-55182 (React2Shell).
-Copyright (C) 2025  Theori Inc.
-
-This program is free software: you can redistribute it and/or modify
-it under the terms of the GNU Affero General Public License as published
-by the Free Software Foundation, either version 3 of the License, or
-(at your option) any later version.
-
-This program is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU Affero General Public License for more details.
-
-You should have received a copy of the GNU Affero General Public License
-along with this program.  If not, see <https://www.gnu.org/licenses/>.
-"""
+# SPDX-FileCopyrightText: 2025 Theori Inc.
+# SPDX-License-Identifier: AGPL-3.0-or-later
 
 """JS bundle probing for framework detection."""
 
@@ -24,9 +9,13 @@ from typing import Any
 from urllib.parse import urljoin, urlparse
 
 from ...http import request_with_retries
+from ...http.headers import normalize_headers
 from ...http.url import build_base_dir_url, build_endpoint_candidates, same_origin
 from ...utils import extract_versions, parse_semver
 from ...utils.confidence import confidence_score
+from ...utils.context import get_scan_context
+
+JS_BUNDLE_PROBE_CACHE_KEY = "js_bundle_probe_cache"
 
 
 def extract_js_urls(body: str, base_url: str) -> list[str]:
@@ -139,14 +128,14 @@ def _probe_js_bundles_ctx(url: str, body: str) -> dict[str, object]:
         if not scan.get("ok") or scan.get("status_code") != 200:
             continue
         js_content = scan.get("body", "") or scan.get("body_snippet", "")
-        js_headers = {str(k).lower(): str(v) for k, v in (scan.get("headers") or {}).items() if k is not None}
+        js_headers = normalize_headers(scan.get("headers"))
 
         try:
-            extracted = extract_versions(js_headers, js_content)
+            extracted = extract_versions(js_headers, js_content, case_sensitive_body=True)
         except Exception:  # noqa: BLE001
             extracted = {}
 
-        for version_key in ("react_version", "rsc_runtime_version", "next_version", "waku_version", "react_router_version", "react_major"):
+        for version_key in ("react_version", "rsc_runtime_version", "next_version", "waku_version", "react_router_version"):
             value = extracted.get(version_key)
             if value is None:
                 continue
@@ -170,19 +159,32 @@ def _probe_js_bundles_ctx(url: str, body: str) -> dict[str, object]:
                 if extracted.get(f"{version_key}_source") is not None:
                     bundle_versions[f"{version_key}_source"] = extracted.get(f"{version_key}_source")
 
-        # React Router (v5/v6/v7) fingerprints
+        # React Router (v5/v6/v7) fingerprints.
+        #
+        # NOTE: Treat JS as case-sensitive text. Avoid `.lower()`/IGNORECASE matching so
+        # we don't accidentally broaden heuristics beyond what the bundle actually contains.
+        #
+        # Many production bundles do not contain the literal package name `react-router`, but
+        # v6.4+ often retains `@remix-run/router` (internal dependency).
+        has_react_router_pkg = (
+            "react-router-dom" in js_content
+            or "react-router" in js_content
+            or "@remix-run/router" in js_content
+        )
+
         has_v7_manifest = "__reactRouterManifest" in js_content or "__reactRouterContext" in js_content
         has_v7_pkg_literal = re.search(r"react-router(?:-dom)?@7", js_content) is not None
-        has_v7_version = re.search(r'"7\.\d+\.\d+"', js_content) is not None and "react-router" in js_content.lower()
+        has_v7_version = re.search(r'"7\.\d+\.\d+"', js_content) is not None and has_react_router_pkg
         has_v7_router = has_v7_manifest or has_v7_pkg_literal or (has_v7_version and "createBrowserRouter" in js_content)
         if has_v7_router:
             signals["react_router_v7_bundle"] = True
 
-        has_react_router_pkg = "react-router-dom" in js_content or "react-router" in js_content.lower()
         has_v6_routes = has_react_router_pkg and "Routes" in js_content and "Route" in js_content and "Switch" not in js_content
         has_v6_data_router = has_react_router_pkg and ("createBrowserRouter" in js_content or "RouterProvider" in js_content)
 
         if not signals.get("react_router_v7_bundle"):
+            if "@remix-run/router" in js_content:
+                signals["react_router_v6_bundle"] = True
             if has_v6_data_router:
                 signals["react_router_v6_bundle"] = True
             elif has_react_router_pkg and re.search(r'"6\.\d+\.\d+"', js_content) and "Routes" in js_content:
@@ -198,9 +200,8 @@ def _probe_js_bundles_ctx(url: str, body: str) -> dict[str, object]:
         if has_expo_router:
             signals["expo_router"] = True
 
-        js_lower = js_content.lower()
-        has_react_dom = "react-dom" in js_lower
-        has_rsc_runtime = "react-server-dom" in js_lower
+        has_react_dom = "react-dom" in js_content
+        has_rsc_runtime = "react-server-dom" in js_content
         if has_react_dom:
             signals["react_dom_bundle"] = True
         if has_rsc_runtime:
@@ -219,6 +220,27 @@ def _probe_js_bundles_ctx(url: str, body: str) -> dict[str, object]:
         has_any_version = bool(bundle_versions.get("react_version") or bundle_versions.get("rsc_runtime_version"))
         if has_any_framework_hint and has_any_version:
             break
+
+    # Derive `react_major` from the selected version pick to avoid inconsistent (react_version != react_major)
+    # when multiple bundles include different React versions at equal confidence.
+    major_source_key = None
+    major_source_conf = None
+    major_source_value = None
+    if bundle_versions.get("rsc_runtime_version"):
+        major_source_key = "rsc_runtime_version"
+        major_source_value = bundle_versions.get("rsc_runtime_version")
+        major_source_conf = bundle_versions.get("rsc_runtime_version_confidence")
+    elif bundle_versions.get("react_version"):
+        major_source_key = "react_version"
+        major_source_value = bundle_versions.get("react_version")
+        major_source_conf = bundle_versions.get("react_version_confidence")
+
+    if major_source_value is not None:
+        parsed = parse_semver(str(major_source_value))
+        if parsed:
+            bundle_versions["react_major"] = parsed.major
+            bundle_versions["react_major_confidence"] = major_source_conf or "medium"
+            bundle_versions["react_major_source"] = f"derived:{major_source_key}" if major_source_key else "derived"
 
     for key, value in bundle_versions.items():
         signals[f"bundle_{key}"] = value
@@ -256,4 +278,16 @@ def probe_js_bundles(
     url: str,
     body: str,
 ) -> dict[str, object]:
+    context = get_scan_context()
+    extra = context.extra
+    if isinstance(extra, dict):
+        cache = extra.setdefault(JS_BUNDLE_PROBE_CACHE_KEY, {})
+        if isinstance(cache, dict):
+            cache_key = str(url or "")
+            cached = cache.get(cache_key)
+            if isinstance(cached, dict):
+                return dict(cached)
+            result = _probe_js_bundles_ctx(url, body)
+            cache[cache_key] = dict(result)
+            return result
     return _probe_js_bundles_ctx(url, body)

@@ -1,4 +1,5 @@
-from __future__ import annotations
+# SPDX-FileCopyrightText: 2025 Theori Inc.
+# SPDX-License-Identifier: AGPL-3.0-or-later
 
 """
 Per-scan ambient context.
@@ -7,6 +8,8 @@ This module provides a ContextVar-backed ScanContext that carries common scan
 plumbing (timeout, http client). Helpers can
 read from this context when explicit arguments are omitted.
 """
+
+from __future__ import annotations
 
 from collections.abc import Iterator
 from contextlib import contextmanager

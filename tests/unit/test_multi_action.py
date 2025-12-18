@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: 2025 Theori Inc.
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 import unittest
 
 from reactguard.models.poc import PocStatus
@@ -7,6 +10,106 @@ from reactguard.vulnerability_detection.journal import PocJournal, journal_conte
 
 
 class TestMultiActionInterpreter(unittest.TestCase):
+    def test_infers_react_major_from_flight_root_shape(self):
+        probe_results = [
+            {
+                "action_id": "40aaaa",
+                "status_code": 500,
+                "body_snippet": '0:["$@1",["x",null]]\n1:E{"digest":"deadbeef"}\n',
+                "headers": {"content-type": "text/x-component"},
+            }
+        ]
+        control_results = [
+            {
+                "action_id": "40bbbb",
+                "status_code": 500,
+                "body_snippet": '0:["$@1",["x",null]]\n1:E{"digest":"deadbeef"}\n',
+                "headers": {"content-type": "text/x-component"},
+            }
+        ]
+
+        result = analyze_multi_action_results(
+            probe_results,
+            action_ids=["40aaaa"],
+            is_rsc_framework=True,
+            server_actions_expected=True,
+            control_results=control_results,
+            react_major=None,
+            react_major_confidence=None,
+        )
+
+        self.assertEqual(result["details"]["react_major"], 18)
+
+    def test_content_type_header_is_case_insensitive_for_success_detection(self):
+        probe_results = [
+            {
+                "action_id": "40aaaa",
+                "status_code": 200,
+                "body_snippet": "ok",
+                "headers": {"Content-Type": "text/x-component"},
+            }
+        ]
+        control_results = [
+            {
+                "action_id": "40aaaa",
+                "status_code": 200,
+                "body_snippet": "ok",
+                "headers": {"Content-Type": "text/x-component"},
+            }
+        ]
+
+        result = analyze_multi_action_results(
+            probe_results,
+            action_ids=["40aaaa"],
+            is_rsc_framework=True,
+            server_actions_expected=True,
+            control_results=control_results,
+            react_major=19,
+        )
+
+        self.assertEqual(result["status"], PocStatus.NOT_VULNERABLE)
+        self.assertEqual(result["details"]["decision_rule"], "_rule_success_path")
+
+    def test_react_major_conflict_lowers_confidence_without_forcing_inconclusive(self):
+        probe_results = [
+            {
+                "action_id": "40aaaa",
+                "status_code": 500,
+                "body_snippet": '1:E{"digest":"deadbeef"}',
+                "headers": {"content-type": "text/x-component"},
+            },
+            {
+                "action_id": "40bbbb",
+                "status_code": 500,
+                "body_snippet": '1:E{"digest":"deadbeef"}',
+                "headers": {"content-type": "text/x-component"},
+            },
+        ]
+        control_results = [
+            {
+                "action_id": "40cccc",
+                "status_code": 500,
+                "body_snippet": '1:E{"digest":"deadbeef"}',
+                "headers": {"content-type": "text/x-component"},
+            }
+        ]
+
+        result = analyze_multi_action_results(
+            probe_results,
+            action_ids=["40aaaa", "40bbbb"],
+            is_rsc_framework=True,
+            server_actions_expected=True,
+            control_results=control_results,
+            react_major=18,
+            react_major_conflict=True,
+            react_major_conflict_confidence="high",
+            react_major_conflict_majors=[18, 19],
+        )
+
+        self.assertEqual(result["status"], PocStatus.LIKELY_NOT_VULNERABLE)
+        self.assertEqual(result["details"]["confidence"], "low")
+        self.assertIs(result["details"].get("react_major_conflict"), True)
+
     def test_safe_args_strategy_match_marks_vulnerable(self):
         probe_results = [
             {

@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2025 Theori Inc.
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 from reactguard.framework_detection.keys import (
     SIG_DETECTION_CONFIDENCE_LEVEL,
     SIG_REACT_BUNDLE_ONLY,
@@ -147,6 +150,40 @@ def test_dec2025_detector_short_circuits_on_react18():
     assert result.status == PocStatus.NOT_APPLICABLE
     assert result.details["not_affected"] is True
     assert "React 18.x" in str(result.details.get("reason") or "")
+
+
+def test_dec2025_detector_does_not_short_circuit_when_react_major_conflicts():
+    detection = FrameworkDetectionResult(
+        tags=[TAG_NEXTJS, TAG_NEXTJS_PAGES_ROUTER],
+        signals={
+            SIG_DETECTION_CONFIDENCE_LEVEL: "high",
+            "detected_react_version": "18.2.0",
+            "detected_react_version_confidence": "high",
+            "react_major_conflict": True,
+            "react_major_conflict_confidence": "high",
+            "react_major_conflict_majors": [18, 19],
+        },
+    )
+    result = CVE202555184VulnerabilityDetector().evaluate("http://example", detection_result=detection)
+    assert result.status == PocStatus.NOT_VULNERABLE
+    assert result.details["reason_code"] == MISSING_SURFACE_REASON_CODE
+
+
+def test_dec2025_detector_short_circuits_when_react_major_conflict_excludes_react19():
+    detection = FrameworkDetectionResult(
+        tags=[TAG_RSC],
+        signals={
+            SIG_DETECTION_CONFIDENCE_LEVEL: "high",
+            "detected_react_version": "18.2.0",
+            "detected_react_version_confidence": "high",
+            "react_major_conflict": True,
+            "react_major_conflict_confidence": "high",
+            "react_major_conflict_majors": [17, 18],
+        },
+    )
+    result = CVE202555184VulnerabilityDetector().evaluate("http://example", detection_result=detection)
+    assert result.status == PocStatus.NOT_APPLICABLE
+    assert result.details["not_affected"] is True
 
 
 def test_rsc_dependency_only_short_circuits_dec2025_family():

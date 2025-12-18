@@ -1,20 +1,5 @@
-"""
-ReactGuard, framework- and vulnerability-detection tooling for CVE-2025-55182 (React2Shell).
-Copyright (C) 2025  Theori Inc.
-
-This program is free software: you can redistribute it and/or modify
-it under the terms of the GNU Affero General Public License as published
-by the Free Software Foundation, either version 3 of the License, or
-(at your option) any later version.
-
-This program is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU Affero General Public License for more details.
-
-You should have received a copy of the GNU Affero General Public License
-along with this program.  If not, see <https://www.gnu.org/licenses/>.
-"""
+# SPDX-FileCopyrightText: 2025 Theori Inc.
+# SPDX-License-Identifier: AGPL-3.0-or-later
 
 """Generic React SPA detector."""
 
@@ -26,6 +11,7 @@ from ..constants import (
     FRAMEWORK_HTML_MARKERS,
     SPA_MODULEPRELOAD_PATTERN,
     SPA_MOUNT_POINT_PATTERN,
+    SPA_SCRIPT_MODULE_PATTERN,
     SPA_VITE_ASSETS_PATTERN,
 )
 from ..keys import (
@@ -72,7 +58,7 @@ class SPADetector(FrameworkDetector):
             spa_signals += 1
             signals["react_spa_mount"] = True
 
-        if 'type="module"' in body:
+        if SPA_SCRIPT_MODULE_PATTERN.search(body):
             spa_signals += 1
             signals["react_spa_modules"] = True
 

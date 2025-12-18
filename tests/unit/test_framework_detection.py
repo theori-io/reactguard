@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2025 Theori Inc.
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 from reactguard.framework_detection.detectors.generic_rsc import GenericRSCDetector
 from reactguard.framework_detection.detectors.nextjs import NextJSDetector
 from reactguard.framework_detection.detectors.react_router import ReactRouterDetector
@@ -51,6 +54,23 @@ def test_framework_detection_engine_runs_detectors(monkeypatch):
     assert result.signals["detected_next_version"] == "15.0.0"
 
 
+def test_framework_detection_engine_detects_nextjs_without_version_headers(monkeypatch):
+    response = HttpResponse(
+        ok=True,
+        status_code=200,
+        headers={},
+        text='__next_f.push("/_next/static/chunks/app.js");',
+        url="http://example",
+    )
+    monkeypatch.setattr(
+        "reactguard.framework_detection.detectors.nextjs.probe_server_actions_support",
+        lambda *_, **__: {"supported": False, "status_code": 404, "has_framework_html_marker": True},
+    )
+    result = FrameworkDetectionEngine().detect(ScanRequest(url="http://example", response=response))
+    assert "nextjs" in result.tags
+    assert result.signals["detection_confidence_level"] in {"medium", "high"}
+
+
 def test_framework_detection_engine_fetch_error(monkeypatch):
     monkeypatch.setattr(
         "reactguard.framework_detection.engine.send_with_retries",
@@ -90,9 +110,28 @@ def test_apply_rsc_flags_marks_rsc_runtime_dependency_only():
 
 
 def test_nextjs_detector_infers_react_major_from_flight():
-    assert NextJSDetector._react_major_from_flight('0:[null,["$"') == 19
+    assert NextJSDetector._react_major_from_flight('0:[null,["$"') == 18
+    assert NextJSDetector._react_major_from_flight('0:{\\"P\\":null') == 19
     assert NextJSDetector._react_major_from_flight('0:"$L') == 18
     assert NextJSDetector._react_major_from_flight("") is None
+
+
+def test_nextjs_detector_does_not_infer_react_major_from_non_nextjs_html():
+    """
+    Guard against false positives from HTML containing JS object literals with numeric keys like `0:{...}`.
+    """
+    detector = NextJSDetector()
+    tags = TagSet()
+    signals = {}
+    detector.detect(
+        body=r'<html><body><script>var s="0:{\"P\":null}";var x={0:{a:1}};</script></body></html>',
+        headers={},
+        tags=tags,
+        signals=signals,
+        context=type("Ctx", (), {"url": None, "http_client": None})(),
+    )
+    assert "nextjs" not in tags
+    assert signals.get("detected_react_major") is None
 
 
 def test_spa_detector_tags_react_spa(monkeypatch):
@@ -191,3 +230,19 @@ def test_generic_rsc_detector_sets_signals():
     assert "react-streaming" in tags
     assert signals["rsc_content_type"] is True
     assert signals["react_streaming_markers"] is True
+
+
+def test_react_major_evidence_conflict_is_annotated():
+    signals = {
+        "detected_react_major": 18,
+        "detected_react_major_confidence": "high",
+        "detected_react_major_source": "flight:nextjs_html",
+        "detected_rsc_runtime_version": "19.0.0",
+        "detected_rsc_runtime_version_confidence": "high",
+        "detected_rsc_runtime_version_source": "header",
+    }
+    FrameworkDetectionEngine._annotate_react_major_evidence(signals)
+    assert signals["react_major_conflict"] is True
+    assert signals["react_major_conflict_confidence"] == "high"
+    assert signals["react_major_conflict_majors"] == [18, 19]
+    assert {entry.get("major") for entry in signals.get("react_major_evidence") or []} == {18, 19}
