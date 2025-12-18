@@ -32,7 +32,7 @@ class TestMultiActionInterpreter(unittest.TestCase):
             probe_results,
             action_ids=["40aaaa"],
             is_rsc_framework=True,
-            server_actions_expected=True,
+            invocation_expected=True,
             control_results=control_results,
             react_major=None,
             react_major_confidence=None,
@@ -62,7 +62,7 @@ class TestMultiActionInterpreter(unittest.TestCase):
             probe_results,
             action_ids=["40aaaa"],
             is_rsc_framework=True,
-            server_actions_expected=True,
+            invocation_expected=True,
             control_results=control_results,
             react_major=19,
         )
@@ -98,7 +98,7 @@ class TestMultiActionInterpreter(unittest.TestCase):
             probe_results,
             action_ids=["40aaaa", "40bbbb"],
             is_rsc_framework=True,
-            server_actions_expected=True,
+            invocation_expected=True,
             control_results=control_results,
             react_major=18,
             react_major_conflict=True,
@@ -141,7 +141,7 @@ class TestMultiActionInterpreter(unittest.TestCase):
             probe_results,
             action_ids=["40aaaa", "40bbbb"],
             is_rsc_framework=True,
-            server_actions_expected=True,
+            invocation_expected=True,
             control_results=control_results,
             react_major=19,
         )
@@ -180,7 +180,7 @@ class TestMultiActionInterpreter(unittest.TestCase):
             probe_results,
             action_ids=["40aaaa", "40bbbb"],
             is_rsc_framework=True,
-            server_actions_expected=True,
+            invocation_expected=True,
             control_results=control_results,
             react_major=19,
         )
@@ -309,7 +309,61 @@ class TestMultiActionInterpreter(unittest.TestCase):
             )
 
         self.assertGreater(len(ambient.entries), 0)
+        self.assertTrue(any(entry.get("step") == "probe" for entry in ambient.to_list()))
+        self.assertTrue(any(entry.get("step") == "decision" for entry in ambient.to_list()))
         self.assertEqual(result["raw_data"]["journal"], ambient.to_list())
+
+    def test_all_failed_includes_raw_results_and_journals_failures(self):
+        probe_results = [
+            {
+                "action_id": "40aaaa",
+                "ok": False,
+                "status_code": None,
+                "body_snippet": "",
+                "headers": {},
+                "endpoint": "https://example.invalid/_action",
+                "error_message": "timed out",
+                "error_type": "TimeoutError",
+            },
+            {
+                "action_id": "40bbbb",
+                "ok": False,
+                "status_code": None,
+                "body_snippet": "",
+                "headers": {},
+                "endpoint": "https://example.invalid/_action",
+                "error_message": "timed out",
+                "error_type": "TimeoutError",
+            },
+        ]
+        control_results = [
+            {
+                "action_id": "control_probe",
+                "ok": False,
+                "status_code": None,
+                "body_snippet": "",
+                "headers": {},
+                "endpoint": "https://example.invalid/_action",
+                "error_message": "timed out",
+                "error_type": "TimeoutError",
+            }
+        ]
+
+        result = analyze_multi_action_results(
+            probe_results,
+            action_ids=["40aaaa", "40bbbb"],
+            is_rsc_framework=True,
+            control_results=control_results,
+        )
+
+        self.assertEqual(result["status"], PocStatus.INCONCLUSIVE)
+        self.assertEqual(result["details"]["decision_rule"], "all_probes_failed")
+        self.assertEqual(result["raw_data"]["probe_results"], probe_results)
+        self.assertEqual(result["raw_data"]["control_results"], control_results)
+
+        journal_entries = result["raw_data"]["journal"]
+        probe_entries = [e for e in journal_entries if e.get("step") == "probe"]
+        self.assertGreaterEqual(len(probe_entries), len(probe_results) + len(control_results))
 
 
 if __name__ == "__main__":

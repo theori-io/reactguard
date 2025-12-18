@@ -72,7 +72,8 @@ def build_multipart_form_payload(
 @dataclass(frozen=True)
 class RscReference:
     """
-    A React Server Components "server reference" string used in decode surfaces.
+    A React Server Components "server reference" string used by RSC Flight protocol payload deserialization
+    (e.g. `decodeReply` in react-server-dom-* runtimes).
 
     Examples:
     - Next.js-style: `$F1:x:__proto__`
@@ -102,7 +103,7 @@ def build_multipart_decode_payload(
     root_object: dict[str, object] | None = None,
 ) -> RscPayload:
     """
-    Minimal multipart payload that exercises React's decode surface.
+    Minimal multipart payload that exercises RSC Flight protocol payload deserialization.
 
     Matches the "two-field" pattern used by a number of RSC stacks:
     - one JSON chunk with a root object (default: `{"x":{}}`)

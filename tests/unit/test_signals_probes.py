@@ -120,7 +120,7 @@ def test_probe_expo_server_functions_discovers_action_endpoint(monkeypatch):
     monkeypatch.setattr(expo_server_functions, "request_with_retries", fake_scan)
     result = expo_server_functions.probe_expo_server_functions("http://example/app")
     assert result.has_rsc_surface is True
-    assert any("/_flight/web/ACTION_./actions/call-action.ts/echo.txt" in ep for ep in result.server_action_endpoints)
+    assert any("/_flight/web/ACTION_./actions/call-action.ts/echo.txt" in ep for ep in result.invocation_endpoints)
 
 
 def test_probe_rsc_endpoint_and_actions(monkeypatch):
@@ -148,7 +148,7 @@ def test_probe_rsc_endpoint_and_actions(monkeypatch):
 def test_apply_rsc_probe_results_promotes_signals(monkeypatch):
     tags = TagSet()
     signals = {}
-    monkeypatch.setattr(rsc, "probe_rsc_and_actions", lambda *_, **__: {"rsc_endpoint_found": False, "server_actions_enabled": True})
+    monkeypatch.setattr(rsc, "probe_rsc_and_actions", lambda *_, **__: {"rsc_endpoint_found": False, "invocation_enabled": True})
     result = rsc.apply_rsc_probe_results(
         "http://example",
         tags=tags,
@@ -158,7 +158,7 @@ def test_apply_rsc_probe_results_promotes_signals(monkeypatch):
         server_actions_imply_rsc=True,
         set_defaults=True,
     )
-    assert result["server_actions_enabled"] is True
+    assert result["invocation_enabled"] is True
     assert "actions" in tags
     assert "rsc-tag" in tags
     assert signals["rsc_endpoint_found"] is True
@@ -248,7 +248,7 @@ def test_apply_server_actions_probe_results_sets_tags():
         fallback_html_signal_key="fallback_html",
     )
     assert outcome["supported"] is True
-    assert signals["server_actions_enabled"] is True
+    assert signals["invocation_enabled"] is True
     assert signals["not_found"] is True
     assert signals["vary_rsc"] is True
     assert signals["detected_react_major"] == 19

@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2025 Theori Inc.
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
-"""Server Actions probing helpers (httpx-backed)."""
+"""Next.js Server Actions probing helpers (RSC Flight protocol)."""
 
 from __future__ import annotations
 
@@ -29,7 +29,7 @@ from ..constants import (
     SERVER_ACTIONS_RSC_FLIGHT_PATTERN,
     SERVER_ACTIONS_STRONG_ACTION_KEYWORDS,
 )
-from ..keys import SIG_SERVER_ACTIONS_CONFIDENCE, SIG_SERVER_ACTIONS_ENABLED
+from ..keys import SIG_INVOCATION_CONFIDENCE, SIG_INVOCATION_ENABLED
 
 
 @dataclass
@@ -82,7 +82,7 @@ class ServerActionsSignalApplier:
 
         strong_rsc_signal = has_action_content_type or has_flight_marker or has_digest or (
             # `Vary: RSC` is a useful hint, but on HTML responses it can be a false positive for
-            # Server Actions (e.g., app/router pages that are RSC-capable but have no actions).
+            # Server Actions (e.g., App Router pages that are RSC-capable but have no actions).
             (not is_html) and vary_has_rsc and (status not in (404, 405) or action_not_found)
         )
 
@@ -92,8 +92,8 @@ class ServerActionsSignalApplier:
         # Only promote "action not found" when paired with strong RSC evidence; plain 404 text should stay unknown.
         #
         # `x-nextjs-action-not-found: 1` is a reliable indicator that the target is Server Actions-capable,
-        # but it does *not* prove a reachable decode surface on this route. Keep confidence at most
-        # medium unless we also see concrete Flight/decode evidence (content-type, Flight rows, digest).
+        # but it does *not* prove a reachable Flight protocol payload deserialization surface on this route. Keep
+        # confidence at most medium unless we also see concrete Flight evidence (content-type, Flight rows, digest).
         if action_not_found and strong_rsc_signal:
             supported = True
             confidence = "high" if (has_action_content_type or has_flight_marker or has_digest) else "medium"
@@ -135,8 +135,8 @@ class ServerActionsSignalApplier:
             self.signals[self.vary_signal_key] = True
 
         if supported:
-            self.signals[SIG_SERVER_ACTIONS_ENABLED] = True
-            self.signals[SIG_SERVER_ACTIONS_CONFIDENCE] = confidence
+            self.signals[SIG_INVOCATION_ENABLED] = True
+            self.signals[SIG_INVOCATION_CONFIDENCE] = confidence
             if self.server_actions_tag:
                 self.tags.add(self.server_actions_tag)
         elif status in (404, 405) and not action_not_found:
@@ -147,25 +147,25 @@ class ServerActionsSignalApplier:
             #
             # Only treat this as a confident negative when we are probing a known action endpoint.
             if self.action_endpoints:
-                self.signals[SIG_SERVER_ACTIONS_ENABLED] = False
-                self.signals[SIG_SERVER_ACTIONS_CONFIDENCE] = "high"
+                self.signals[SIG_INVOCATION_ENABLED] = False
+                self.signals[SIG_INVOCATION_CONFIDENCE] = "high"
             else:
-                self.signals.setdefault(SIG_SERVER_ACTIONS_ENABLED, None)
-                self.signals.setdefault(SIG_SERVER_ACTIONS_CONFIDENCE, "low")
+                self.signals.setdefault(SIG_INVOCATION_ENABLED, None)
+                self.signals.setdefault(SIG_INVOCATION_CONFIDENCE, "low")
         elif is_html and has_framework_marker:
             # HTML wrappers/dev overlays are often uninterpretable for action reachability (FN-prone).
             # Record the hint but keep reachability unknown.
-            self.signals.setdefault(SIG_SERVER_ACTIONS_ENABLED, None)
-            self.signals.setdefault(SIG_SERVER_ACTIONS_CONFIDENCE, "low")
+            self.signals.setdefault(SIG_INVOCATION_ENABLED, None)
+            self.signals.setdefault(SIG_INVOCATION_CONFIDENCE, "low")
             if self.fallback_html_signal_key:
                 self.signals[self.fallback_html_signal_key] = True
         elif self.set_defaults:
-            self.signals.setdefault(SIG_SERVER_ACTIONS_ENABLED, None)
-            self.signals.setdefault(SIG_SERVER_ACTIONS_CONFIDENCE, "low")
+            self.signals.setdefault(SIG_INVOCATION_ENABLED, None)
+            self.signals.setdefault(SIG_INVOCATION_CONFIDENCE, "low")
 
         return {
             "supported": supported,
-            "confidence": self.signals.get(SIG_SERVER_ACTIONS_CONFIDENCE),
+            "confidence": self.signals.get(SIG_INVOCATION_CONFIDENCE),
             "status_code": status,
             "probe_result": probe_result,
         }
@@ -435,7 +435,7 @@ def _detect_server_actions_ctx(
         return {
             "supported": False,
             "confidence": "medium",
-            "reason": f"Redirect ({status_code}) - Server Actions likely not enabled",
+            "reason": f"Redirect ({status_code}) - Server Actions not observed on this route",
             "status_code": status_code,
             "content_type": content_type,
             "has_rsc_format": False,

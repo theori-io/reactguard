@@ -14,7 +14,7 @@ from typing_extensions import NotRequired
 
 
 class RscWireFormat(str, Enum):
-    """High-level request body encoding used for RSC/Server Functions probes."""
+    """High-level request body encoding used for RSC Flight protocol probes."""
 
     MULTIPART_FORM = "multipart-form"
     JSON = "json"

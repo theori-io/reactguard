@@ -60,7 +60,7 @@ _DEFAULT_STRONG_SIGNAL_WEIGHTS: dict[str, int] = {
     "expo_router": 14,
     "expo_registry": 18,
     # Attack surface
-    "server_actions_enabled": 8,
+    "invocation_enabled": 8,
 }
 
 _DEFAULT_SUPPORTING_SIGNAL_WEIGHTS: dict[str, int] = {

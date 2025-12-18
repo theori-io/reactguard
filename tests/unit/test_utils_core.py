@@ -109,3 +109,16 @@ def test_extract_versions_manifest_and_plain_paths():
 
     versions_literal = version.extract_versions({}, "react-server-dom-webpack@19.0.2 react@19.0.3 next@15.10.0")
     assert versions_literal["react_version"] in {"19.0.2", "19.0.3"}
+
+
+def test_extract_versions_reactversion_constant():
+    body = """
+    /** @license React */
+    // react-dom.development.js
+    var ReactVersion = '18.3.0-canary-8c8ee9ee6-20231026';
+    exports.version = ReactVersion;
+    """
+    versions = version.extract_versions({}, body, case_sensitive_body=True)
+    assert versions["react_version"] == "18.3.0-canary-8c8ee9ee6-20231026"
+    assert versions["react_version_source"] == "react_version_const"
+    assert versions["react_major"] == 18

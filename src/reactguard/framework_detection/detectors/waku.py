@@ -16,7 +16,7 @@ from ..constants import (
     WAKU_VARS_PATTERN,
     WAKU_WEBPACK_CHUNK_PATTERN,
 )
-from ..keys import SIG_RSC_ENDPOINT_FOUND, SIG_SERVER_ACTION_ENDPOINTS, SIG_SERVER_ACTIONS_ENABLED, TAG_RSC, TAG_WAKU
+from ..keys import SIG_INVOCATION_ENABLED, SIG_INVOCATION_ENDPOINTS, SIG_RSC_ENDPOINT_FOUND, TAG_RSC, TAG_WAKU
 from ..signals.waku import (
     probe_waku_minimal_html,
     probe_waku_rsc_surface,
@@ -96,11 +96,11 @@ class WakuDetector(FrameworkDetector):
                             endpoints_list.append(candidate)
 
             if has_actions:
-                signals[SIG_SERVER_ACTIONS_ENABLED] = True
+                signals[SIG_INVOCATION_ENABLED] = True
                 signals["waku_action_endpoints"] = action_count
                 has_rsc_surface = True
                 if endpoints_list:
-                    signals[SIG_SERVER_ACTION_ENDPOINTS] = endpoints_list
+                    signals[SIG_INVOCATION_ENDPOINTS] = endpoints_list
 
         if is_waku:
             tags.add(TAG_WAKU)

@@ -19,7 +19,7 @@ _ACTION_REF_RE = re.compile(r"(\./[^\"']+?\.(?:ts|tsx|js|jsx|mjs|cjs)#[_$A-Za-z0
 @dataclass(frozen=True)
 class ExpoProbeResult:
     has_rsc_surface: bool
-    server_action_endpoints: list[str]
+    invocation_endpoints: list[str]
     evidence: dict[str, object]
 
 
@@ -123,7 +123,7 @@ def _probe_expo_server_functions_ctx(base_url: str) -> ExpoProbeResult:
 
     return ExpoProbeResult(
         has_rsc_surface=bool(ok),
-        server_action_endpoints=endpoints,
+        invocation_endpoints=endpoints,
         evidence={
             "flight_url": flight_url,
             "bundle_paths": bundle_paths,
@@ -143,7 +143,7 @@ def probe_expo_server_functions(
     - Derives action endpoints by scanning RSC module bundles for action refs like `./path.ts#export`.
     """
     if not base_url:
-        return ExpoProbeResult(has_rsc_surface=False, server_action_endpoints=[], evidence={})
+        return ExpoProbeResult(has_rsc_surface=False, invocation_endpoints=[], evidence={})
     return _probe_expo_server_functions_ctx(base_url)
 
 

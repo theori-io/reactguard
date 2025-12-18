@@ -11,16 +11,16 @@ def test_detection_snapshot_resolves_versions_and_context():
         signals={
             "detected_react_major": "19",
             "detected_react_major_confidence": "high",
-            "server_actions_enabled": True,
-            "server_actions_confidence": "medium",
-            "server_action_endpoints": ["/RSC/F/abc/action.txt"],
+            "invocation_enabled": True,
+            "invocation_confidence": "medium",
+            "invocation_endpoints": ["/RSC/F/abc/action.txt"],
         },
     )
     snapshot = DetectionSnapshot.from_detection(detection)
     assert snapshot.react_major == 19
     ctx = snapshot.to_detect_context()
     assert ctx["react_major_confidence"] == "high"
-    assert ctx["server_action_endpoints"] == ["/RSC/F/abc/action.txt"]
+    assert ctx["invocation_endpoints"] == ["/RSC/F/abc/action.txt"]
 
 
 def test_detection_snapshot_falls_back_to_versions():

@@ -7,6 +7,7 @@ from reactguard.framework_detection.detectors.react_router import ReactRouterDet
 from reactguard.framework_detection.detectors.spa import SPADetector
 from reactguard.framework_detection.detectors.waku import WakuDetector
 from reactguard.framework_detection.engine import FrameworkDetectionEngine
+from reactguard.framework_detection.nextjs_flight import infer_nextjs_rsc_signals_from_html
 from reactguard.framework_detection.scoring import score_confidence
 from reactguard.framework_detection.signals.waku import WakuServerActionsProbeResult
 from reactguard.http.models import HttpResponse
@@ -18,7 +19,7 @@ def test_score_confidence_with_strong_and_supporting_signals():
     signals = {
         "nextjs_hydration_array": True,
         "vite_assets": True,
-        "server_actions_enabled": True,
+        "invocation_enabled": True,
         "react_router_confidence": "medium",
     }
     score, level, breakdown = score_confidence(signals)
@@ -116,6 +117,19 @@ def test_nextjs_detector_infers_react_major_from_flight():
     assert NextJSDetector._react_major_from_flight("") is None
 
 
+def test_infer_nextjs_rsc_signals_from_html():
+    assert infer_nextjs_rsc_signals_from_html("") == (False, None)
+    assert infer_nextjs_rsc_signals_from_html("__next_f.push([])")[0] is True
+
+    is_rsc, major = infer_nextjs_rsc_signals_from_html('0:{\\"P\\":null')
+    assert is_rsc is True
+    assert major == 19
+
+    is_rsc, major = infer_nextjs_rsc_signals_from_html('0:"$L1"')
+    assert is_rsc is True
+    assert major == 18
+
+
 def test_nextjs_detector_does_not_infer_react_major_from_non_nextjs_html():
     """
     Guard against false positives from HTML containing JS object literals with numeric keys like `0:{...}`.
@@ -168,9 +182,9 @@ def test_waku_detector_collects_signals(monkeypatch):
         context=type("Ctx", (), {"url": "http://example", "http_client": None})(),
     )
     assert "waku" in tags and "rsc" in tags
-    assert signals["server_actions_enabled"] is True
+    assert signals["invocation_enabled"] is True
     assert signals["rsc_endpoint_found"] is True
-    assert signals["server_action_endpoints"]
+    assert signals["invocation_endpoints"]
 
 
 def test_expo_detector_tags_framework(monkeypatch):
@@ -180,7 +194,7 @@ def test_expo_detector_tags_framework(monkeypatch):
         lambda *_args, **_kwargs: type(
             "ExpoProbe",
             (),
-            {"has_rsc_surface": False, "server_action_endpoints": [], "evidence": {}},
+            {"has_rsc_surface": False, "invocation_endpoints": [], "evidence": {}},
         )(),
     )
     detector = __import__("reactguard.framework_detection.detectors.expo", fromlist=["ExpoDetector"]).ExpoDetector()
@@ -212,7 +226,7 @@ def test_react_router_detector_does_not_probe_rsc(monkeypatch):
     )
     assert "react-router-v7" in tags
     assert signals["react_router_confidence"] == "high"
-    assert signals.get("server_actions_enabled") is None
+    assert signals.get("invocation_enabled") is None
 
 
 def test_generic_rsc_detector_sets_signals():

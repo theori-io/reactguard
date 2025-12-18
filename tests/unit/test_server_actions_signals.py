@@ -28,7 +28,7 @@ class TestApplyServerActionsProbeResults(unittest.TestCase):
         )
 
         self.assertFalse(result["supported"])
-        self.assertNotIn("server_actions_enabled", signals)
+        self.assertNotIn("invocation_enabled", signals)
         self.assertTrue(signals["nextjs_action_not_found"])
 
     def test_html_with_markers_and_keywords_counts_as_supported(self):
@@ -55,7 +55,7 @@ class TestApplyServerActionsProbeResults(unittest.TestCase):
 
         self.assertTrue(result["supported"])
         self.assertIn("server-actions", tags)
-        self.assertEqual(signals["server_actions_confidence"], "medium")
+        self.assertEqual(signals["invocation_confidence"], "medium")
 
     def test_html_marker_hint_sets_false_with_low_confidence(self):
         signals = {}
@@ -78,8 +78,8 @@ class TestApplyServerActionsProbeResults(unittest.TestCase):
         )
 
         self.assertFalse(result["supported"])
-        self.assertFalse(signals["server_actions_enabled"])
-        self.assertEqual(signals["server_actions_confidence"], "low")
+        self.assertIsNone(signals["invocation_enabled"])
+        self.assertEqual(signals["invocation_confidence"], "low")
         self.assertTrue(signals["nextjs_probe_html_with_next_marker"])
 
     def test_sets_react_major_and_rsc_flight_signals(self):
@@ -100,7 +100,7 @@ class TestApplyServerActionsProbeResults(unittest.TestCase):
             rsc_flight_signal_key="rsc_flight_payload",
         )
 
-        self.assertTrue(signals["server_actions_enabled"])
+        self.assertTrue(signals["invocation_enabled"])
         self.assertEqual(signals["detected_react_major"], 19)
         self.assertTrue(signals["rsc_flight_payload"])
 

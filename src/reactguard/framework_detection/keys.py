@@ -37,9 +37,9 @@ SIG_RSC_CONTENT_TYPE = "rsc_content_type"
 SIG_RSC_DEPENDENCY_ONLY = "rsc_dependency_only"
 SIG_RSC_ENDPOINT_FOUND = "rsc_endpoint_found"
 SIG_RSC_FLIGHT_PAYLOAD = "rsc_flight_payload"
-SIG_SERVER_ACTIONS_CONFIDENCE = "server_actions_confidence"
-SIG_SERVER_ACTIONS_ENABLED = "server_actions_enabled"
-SIG_SERVER_ACTION_ENDPOINTS = "server_action_endpoints"
+SIG_INVOCATION_CONFIDENCE = "invocation_confidence"
+SIG_INVOCATION_ENABLED = "invocation_enabled"
+SIG_INVOCATION_ENDPOINTS = "invocation_endpoints"
 
 __all__ = [
     "TAG_EXPO",
@@ -73,7 +73,7 @@ __all__ = [
     "SIG_RSC_DEPENDENCY_ONLY",
     "SIG_RSC_ENDPOINT_FOUND",
     "SIG_RSC_FLIGHT_PAYLOAD",
-    "SIG_SERVER_ACTIONS_CONFIDENCE",
-    "SIG_SERVER_ACTIONS_ENABLED",
-    "SIG_SERVER_ACTION_ENDPOINTS",
+    "SIG_INVOCATION_CONFIDENCE",
+    "SIG_INVOCATION_ENABLED",
+    "SIG_INVOCATION_ENDPOINTS",
 ]

@@ -15,13 +15,13 @@ from ..constants import (
     EXPO_STATIC_WEB_PATTERN,
 )
 from ..keys import (
+    SIG_INVOCATION_CONFIDENCE,
+    SIG_INVOCATION_ENABLED,
+    SIG_INVOCATION_ENDPOINTS,
     SIG_REACT_BUNDLE,
     SIG_REACT_DOM_BUNDLE,
     SIG_REACT_SERVER_DOM_BUNDLE,
     SIG_RSC_ENDPOINT_FOUND,
-    SIG_SERVER_ACTION_ENDPOINTS,
-    SIG_SERVER_ACTIONS_CONFIDENCE,
-    SIG_SERVER_ACTIONS_ENABLED,
     TAG_EXPO,
     TAG_EXPO_RSC,
     TAG_EXPO_SERVER_ACTIONS,
@@ -87,7 +87,7 @@ class ExpoDetector(FrameworkDetector):
 
         if is_expo:
             tags.add(TAG_EXPO)
-            if context.url and signals.get(SIG_SERVER_ACTIONS_ENABLED) is None:
+            if context.url and signals.get(SIG_INVOCATION_ENABLED) is None:
                 probe = probe_expo_server_functions(context.url)
 
                 if probe.has_rsc_surface:
@@ -96,16 +96,16 @@ class ExpoDetector(FrameworkDetector):
                     signals[SIG_RSC_ENDPOINT_FOUND] = True
                     signals["expo_flight_surface"] = True
 
-                if probe.server_action_endpoints:
+                if probe.invocation_endpoints:
                     tags.add(TAG_EXPO_SERVER_ACTIONS)
-                    signals[SIG_SERVER_ACTIONS_ENABLED] = True
-                    signals[SIG_SERVER_ACTION_ENDPOINTS] = list(probe.server_action_endpoints)
-                    signals.setdefault(SIG_SERVER_ACTIONS_CONFIDENCE, "medium")
+                    signals[SIG_INVOCATION_ENABLED] = True
+                    signals[SIG_INVOCATION_ENDPOINTS] = list(probe.invocation_endpoints)
+                    signals.setdefault(SIG_INVOCATION_CONFIDENCE, "medium")
                 else:
                     # We have an Expo Router surface but did not discover a concrete action endpoint.
                     # Treat this as "unknown" rather than a confident negative.
-                    signals.setdefault(SIG_SERVER_ACTIONS_ENABLED, None)
-                    signals.setdefault(SIG_SERVER_ACTIONS_CONFIDENCE, "none")
+                    signals.setdefault(SIG_INVOCATION_ENABLED, None)
+                    signals.setdefault(SIG_INVOCATION_CONFIDENCE, "none")
                 if probe.evidence:
                     signals["expo_rsc_evidence"] = dict(probe.evidence)
 
