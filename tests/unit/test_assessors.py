@@ -54,8 +54,8 @@ class TestNextJSAssessor(unittest.TestCase):
             patch(
                 "reactguard.vulnerability_detection.assessors.nextjs.run_rsc_action_probes",
                 return_value=(
-                    [{"ok": True, "status_code": 500, "headers": {}, "body_snippet": "err"}] * 3,
-                    {"ok": True, "status_code": 200, "headers": {}, "body_snippet": "ok"},
+                    [{"ok": True, "status_code": 500, "headers": {"content-type": "text/x-component"}, "body_snippet": '0:{"a":"$@1"}'}] * 3,
+                    {"ok": True, "status_code": 200, "headers": {"content-type": "text/x-component"}, "body_snippet": '0:{"a":"$@1"}'},
                 ),
             ) as run_probes,
             patch("reactguard.vulnerability_detection.assessors.nextjs.NextjsInterpreter") as analyzer_cls,

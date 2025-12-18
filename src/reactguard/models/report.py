@@ -27,6 +27,51 @@ from .poc import PocStatus
 from .scan import FrameworkDetectionResult
 
 
+def _normalize_confidence_label(value: Any) -> str:
+    """
+    External contract: only ``low | medium | high``.
+
+    Treat ``none``/unknown/empty as ``low``.
+    """
+    raw = str(value or "").strip().lower()
+    if raw == "high":
+        return "high"
+    if raw in {"med", "medium"}:
+        return "medium"
+    if raw == "low":
+        return "low"
+    return "low"
+
+
+def _normalize_confidence_fields(value: Any) -> Any:
+    """
+    Recursively normalize *confidence-like* fields inside mappings/lists.
+
+    Any key containing the substring "confidence" is treated as a confidence label when its
+    value is a string or None, and normalized to ``low | medium | high``.
+    """
+    if isinstance(value, dict):
+        normalized: dict[str, Any] = {}
+        for key, item in value.items():
+            inner = _normalize_confidence_fields(item)
+            if isinstance(key, str) and "confidence" in key.lower() and (inner is None or isinstance(inner, str)):
+                normalized[key] = _normalize_confidence_label(inner)
+            else:
+                normalized[key] = inner
+        return normalized
+    if isinstance(value, list):
+        return [_normalize_confidence_fields(item) for item in value]
+    return value
+
+
+def _apply_verdict_invariants(status: PocStatus, details: dict[str, Any]) -> PocStatus:
+    # Require "VULNERABLE" to be backed by high confidence; otherwise downgrade.
+    confidence = details.get("confidence")
+    if status == PocStatus.VULNERABLE and confidence != "high":
+        return PocStatus.LIKELY_VULNERABLE
+    return status
+
+
 @dataclass
 class VulnerabilityReport:
     """Normalized PoC result wrapper."""
@@ -64,10 +109,13 @@ class VulnerabilityReport:
         raise KeyError(key)
 
     def to_dict(self) -> dict[str, Any]:
+        details = _normalize_confidence_fields(dict(self.details or {}))
+        raw_data = _normalize_confidence_fields(dict(self.raw_data or {}))
+        status = _apply_verdict_invariants(self.status, details) if isinstance(self.status, PocStatus) else self.status
         return {
-            "status": self.status,
-            "details": dict(self.details or {}),
-            "raw_data": dict(self.raw_data or {}),
+            "status": status,
+            "details": details,
+            "raw_data": raw_data,
         }
 
     @classmethod
@@ -128,7 +176,7 @@ class ScanReport:
             "status": self.status,
             "framework_detection": {
                 "tags": self.framework_detection.tags,
-                "signals": self.framework_detection.signals,
+                "signals": _normalize_confidence_fields(dict(self.framework_detection.signals or {})),
             },
             "vulnerability_detection": self.vulnerability_detection.to_dict(),
             "vulnerability_detections": [v.to_dict() for v in self.vulnerability_detections],
@@ -150,7 +198,7 @@ class ScanReport:
 
         if not vuln_reports:
             tags = detection.tags or []
-            reason = "No applicable CVE detectors for the detected framework tags"
+            reason = "No applicable CVE detectors for detected framework tags"
             if tags:
                 reason = f"{reason}: {', '.join(tags)}"
             primary = VulnerabilityReport(status=PocStatus.NOT_APPLICABLE, details={"reason": reason})

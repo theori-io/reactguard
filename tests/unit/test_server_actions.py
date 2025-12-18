@@ -10,8 +10,8 @@ def test_detect_server_actions_handles_404(monkeypatch):
     )
     result = server_actions.detect_server_actions("http://example")
     assert result["supported"] is False
-    assert result["confidence"] == "high"
-    assert "not available" in result["reason"].lower()
+    assert result["confidence"] == "medium"
+    assert "not observed" in result["reason"].lower()
 
 
 def test_detect_server_actions_html_and_rsc_paths(monkeypatch):
