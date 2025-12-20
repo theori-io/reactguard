@@ -27,7 +27,7 @@ def test_scan_report_to_dict_and_from_parts():
     assert payload["framework_detection"]["tags"] == ["nextjs"]
     assert payload["vulnerability_detection"]["status"] == PocStatus.NOT_VULNERABLE
     reconstructed = ScanReport.from_parts(detection, {"status": PocStatus.LIKELY_NOT_VULNERABLE, "details": {}})
-    assert reconstructed.status == PocStatus.LIKELY_NOT_VULNERABLE
+    assert reconstructed.status == PocStatus.INCONCLUSIVE
 
 
 def test_scan_report_empty_vulnerability_list_is_not_applicable():
@@ -36,6 +36,13 @@ def test_scan_report_empty_vulnerability_list_is_not_applicable():
     assert report.status == PocStatus.NOT_APPLICABLE
     assert report.vulnerability_detection.status == PocStatus.NOT_APPLICABLE
     assert "reason" in report.vulnerability_detection.details
+
+
+def test_scan_report_aggregates_normalized_status():
+    detection = FrameworkDetectionResult(tags=["nextjs"], signals={"signal": True})
+    vuln = VulnerabilityReport(status=PocStatus.NOT_VULNERABLE, details={"confidence": "low"})
+    scan = ScanReport.from_parts(detection, [vuln])
+    assert scan.status == PocStatus.INCONCLUSIVE
 
 
 def test_verdict_invariants_downgrade_on_confidence():

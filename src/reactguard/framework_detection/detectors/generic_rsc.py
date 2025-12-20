@@ -8,8 +8,15 @@ from typing import Any
 from ...http.heuristics import looks_like_html
 from ...rsc.heuristics import is_rsc_content_type, looks_like_flight_payload
 from ..base import DetectionContext, DetectionState, FrameworkDetector
-from ..constants import GENERIC_FRAGMENT_PATTERN
-from ..keys import SIG_REACT_STREAMING_MARKERS, SIG_RSC_CONTENT_TYPE, SIG_RSC_FLIGHT_PAYLOAD, TAG_REACT_STREAMING, TAG_RSC
+from ..constants import FRAMEWORK_HTML_MARKERS, GENERIC_FRAGMENT_PATTERN
+from ..keys import (
+    SIG_REACT_STREAMING_MARKERS,
+    SIG_RSC_CONTENT_TYPE,
+    SIG_RSC_FLIGHT_PAYLOAD,
+    SIG_RSC_FLIGHT_PAYLOAD_HTML_WRAPPED,
+    TAG_REACT_STREAMING,
+    TAG_RSC,
+)
 
 
 class GenericRSCDetector(FrameworkDetector):
@@ -26,6 +33,7 @@ class GenericRSCDetector(FrameworkDetector):
     ) -> None:
         tags = state.tags
         signals = state.signals
+        body_lower = (body or "").lower()
         if is_rsc_content_type(headers):
             tags.add(TAG_RSC)
             signals[SIG_RSC_CONTENT_TYPE] = True
@@ -35,6 +43,9 @@ class GenericRSCDetector(FrameworkDetector):
         if looks_like_flight_payload(body) and not looks_like_html(headers, body):
             tags.add(TAG_RSC)
             signals[SIG_RSC_FLIGHT_PAYLOAD] = True
+        elif looks_like_flight_payload(body) and looks_like_html(headers, body):
+            if any(marker in body_lower for marker in FRAMEWORK_HTML_MARKERS):
+                signals[SIG_RSC_FLIGHT_PAYLOAD_HTML_WRAPPED] = True
 
         if GENERIC_FRAGMENT_PATTERN.search(body) or "<!--$-->" in body:
             tags.add(TAG_REACT_STREAMING)

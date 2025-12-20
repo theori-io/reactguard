@@ -9,7 +9,7 @@ import re
 from dataclasses import dataclass
 
 from ...http import request_with_retries
-from ...http.js import DEFAULT_MAX_JS_BYTES
+from ...http.js import DEFAULT_MAX_JS_BYTES, _resolve_js_byte_budget
 from ...http.url import build_endpoint_candidates, same_origin
 from ...rsc.heuristics import looks_like_flight_payload
 _BUNDLE_URL_RE = re.compile(r'"(/[^"\s]+?\.bundle\?[^"\s]+)"')
@@ -73,6 +73,7 @@ def _discover_action_refs_from_bundles(base_url: str, bundle_paths: list[str]) -
     if not base_url:
         return refs
     total_bytes = 0
+    byte_budget = _resolve_js_byte_budget(DEFAULT_MAX_JS_BYTES)
     for bundle_path in bundle_paths:
         for candidate in build_endpoint_candidates(base_url, bundle_path)[:20]:
             resp = request_with_retries(candidate, allow_redirects=True)
@@ -85,7 +86,7 @@ def _discover_action_refs_from_bundles(base_url: str, bundle_paths: list[str]) -
             if not body:
                 continue
             total_bytes += len(body)
-            if DEFAULT_MAX_JS_BYTES and total_bytes > DEFAULT_MAX_JS_BYTES:
+            if byte_budget is not None and total_bytes > byte_budget:
                 return refs
             for match in _ACTION_REF_RE.finditer(body):
                 ref = match.group(1)

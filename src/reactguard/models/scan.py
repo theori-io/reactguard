@@ -8,6 +8,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+from ..framework_detection.keys import SIG_DETECTION_CONFIDENCE, SIG_DETECTION_CONFIDENCE_LEVEL
 from ..http.models import HttpResponse
 
 
@@ -48,8 +49,8 @@ class FrameworkDetectionResult:
 
     @property
     def confidence(self) -> float:
-        return float(self.signals.get("detection_confidence", 0.0))
+        return float(self.signals.get(SIG_DETECTION_CONFIDENCE, 0.0))
 
     @property
     def confidence_level(self) -> str:
-        return str(self.signals.get("detection_confidence_level", "unknown"))
+        return str(self.signals.get(SIG_DETECTION_CONFIDENCE_LEVEL, "unknown"))
