@@ -20,13 +20,20 @@ from .server_actions import probe_server_actions_support
 class RscSignalApplier:
     """Stateful applier for folding RSC + server action probe results into tags/signals."""
 
-    tags: TagSet
-    signals: dict[str, Any]
+    state: DetectionState
     base_url: str | None
     rsc_tag: str | None = None
     server_actions_tag: str | None = None
     server_actions_imply_rsc: bool = False
     set_defaults: bool = False
+
+    @property
+    def tags(self) -> TagSet:
+        return self.state.tags
+
+    @property
+    def signals(self) -> dict[str, Any]:
+        return self.state.signals
 
     def apply(
         self,
@@ -137,9 +144,9 @@ def probe_rsc_and_actions(
 def apply_rsc_probe_results(
     base_url: str | None,
     *,
+    state: DetectionState | None = None,
     tags: TagSet | None = None,
     signals: dict[str, Any] | None = None,
-    state: DetectionState | None = None,
     rsc_tag: str | None = None,
     server_actions_tag: str | None = None,
     server_actions_imply_rsc: bool = False,
@@ -151,16 +158,15 @@ def apply_rsc_probe_results(
     - Adds ``rsc_tag`` when the RSC endpoint is reachable (or when actions imply RSC).
     - Adds ``server_actions_tag`` when server actions are detected.
     - Optionally sets default False values when nothing is detected.
+    - Prefer ``state``; ``tags/signals`` are legacy shims.
     """
-    if state is not None:
-        tags = state.tags
-        signals = state.signals
-    if tags is None or signals is None:
-        raise ValueError("tags/signals or state must be provided")
+    if state is None:
+        if tags is None or signals is None:
+            raise ValueError("state is required (or provide legacy tags/signals)")
+        state = DetectionState(tags=tags, signals=signals)
 
     applier = RscSignalApplier(
-        tags=tags,
-        signals=signals,
+        state=state,
         base_url=base_url,
         rsc_tag=rsc_tag,
         server_actions_tag=server_actions_tag,

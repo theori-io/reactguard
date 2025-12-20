@@ -218,8 +218,7 @@ def _normalize_response(result: HttpResponse | Mapping[str, Any]) -> HttpRespons
 class ServerActionsSignalApplier:
     """Stateful applier for folding server action probe results into tags/signals."""
 
-    tags: TagSet
-    signals: dict[str, Any]
+    state: DetectionState
     base_url: str | None = None
     action_header: str = SERVER_ACTIONS_DEFAULT_ACTION_HEADER
     payload_style: str = "multipart"
@@ -235,7 +234,15 @@ class ServerActionsSignalApplier:
 
     @classmethod
     def from_state(cls, state: DetectionState, **kwargs: Any) -> "ServerActionsSignalApplier":
-        return cls(tags=state.tags, signals=state.signals, **kwargs)
+        return cls(state=state, **kwargs)
+
+    @property
+    def tags(self) -> TagSet:
+        return self.state.tags
+
+    @property
+    def signals(self) -> dict[str, Any]:
+        return self.state.signals
 
     def apply(
         self,
@@ -693,9 +700,9 @@ def apply_server_actions_probe_results(
     *,
     base_url: str | None = None,
     probe_result: ServerActionsProbeResult | Mapping[str, Any] | None = None,
+    state: DetectionState | None = None,
     tags: TagSet | None = None,
     signals: dict[str, Any] | None = None,
-    state: DetectionState | None = None,
     action_header: str = SERVER_ACTIONS_DEFAULT_ACTION_HEADER,
     payload_style: str = "multipart",
     server_actions_tag: str | None = None,
@@ -715,16 +722,15 @@ def apply_server_actions_probe_results(
     - Accepts either an existing probe_result or base_url to probe.
     - Applies standard heuristics (action keywords + framework markers, RSC content, etc.).
     - Optionally tags, sets defaults, and records framework-specific signal keys.
+    - Prefer ``state``; ``tags/signals`` are legacy shims.
     """
-    if state is not None:
-        tags = state.tags
-        signals = state.signals
-    if tags is None or signals is None:
-        raise ValueError("tags/signals or state must be provided")
+    if state is None:
+        if tags is None or signals is None:
+            raise ValueError("state is required (or provide legacy tags/signals)")
+        state = DetectionState(tags=tags, signals=signals)
 
     applier = ServerActionsSignalApplier(
-        tags=tags,
-        signals=signals,
+        state=state,
         base_url=base_url,
         action_header=action_header,
         payload_style=payload_style,

@@ -180,6 +180,14 @@ class VulnerabilityReport:
             "raw_data": raw_data,
         }
 
+    def normalized_status(self) -> PocStatus | Any:
+        """Return a verdict normalized by confidence invariants."""
+        if not isinstance(self.status, PocStatus):
+            return self.status
+        details = dict(self.details or {})
+        details["confidence"] = normalize_confidence(details.get("confidence"))
+        return apply_verdict_invariants(self.status, details)
+
     @classmethod
     def from_mapping(cls, data: dict[str, Any]) -> VulnerabilityReport:
         status_val = data.get("status")
@@ -221,15 +229,16 @@ class ScanReport:
         Ordering is intentionally conservative: any confirmed vulnerability dominates; otherwise any inconclusive
         result dominates; otherwise fall back to the strongest "not vulnerable" style result available.
         """
-        if any(r.status == PocStatus.VULNERABLE for r in reports):
+        normalized = [r.normalized_status() for r in reports]
+        if any(status == PocStatus.VULNERABLE for status in normalized):
             return PocStatus.VULNERABLE
-        if any(r.status == PocStatus.LIKELY_VULNERABLE for r in reports):
+        if any(status == PocStatus.LIKELY_VULNERABLE for status in normalized):
             return PocStatus.LIKELY_VULNERABLE
-        if any(r.status == PocStatus.INCONCLUSIVE for r in reports):
+        if any(status == PocStatus.INCONCLUSIVE for status in normalized):
             return PocStatus.INCONCLUSIVE
-        if any(r.status == PocStatus.LIKELY_NOT_VULNERABLE for r in reports):
+        if any(status == PocStatus.LIKELY_NOT_VULNERABLE for status in normalized):
             return PocStatus.LIKELY_NOT_VULNERABLE
-        if any(r.status == PocStatus.NOT_VULNERABLE for r in reports):
+        if any(status == PocStatus.NOT_VULNERABLE for status in normalized):
             return PocStatus.NOT_VULNERABLE
         return PocStatus.NOT_APPLICABLE
 

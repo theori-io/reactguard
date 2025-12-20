@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
 from reactguard.framework_detection.signals import bundle, expo_server_functions, react_router_server_functions, rsc, server_actions, waku
-from reactguard.http.js import extract_js_asset_urls
+from reactguard.http.js import crawl_same_origin_js_modules, extract_js_asset_urls
 from reactguard.http.models import HttpResponse
 from reactguard.utils.context import scan_context
 from reactguard.utils.tag_manager import TagSet
@@ -32,7 +32,52 @@ def test_extract_js_urls_normalizes_and_prioritizes():
     urls = extract_js_asset_urls(body, base_url)
     assert urls[0].startswith("http://example/_next/static")
     assert any(u.startswith("http://example/app/main.js") for u in urls)
-    assert not any(u.startswith("http://cdn.example.com") for u in urls)
+    assert any(u.startswith("http://cdn.example.com") for u in urls)
+
+
+def test_extract_js_urls_allows_cross_origin_assets_from_root():
+    base_url = "https://app.example.com"
+    body = """
+    <script src="https://cdn.other.com/assets/other.js"></script>
+    <script src="https://static.example.com/_next/static/app.js"></script>
+    <script src="/local.js"></script>
+    """
+    urls = extract_js_asset_urls(body, base_url)
+    assert any(u.startswith("https://app.example.com") for u in urls)
+    cross_origin = [u for u in urls if not u.startswith("https://app.example.com")]
+    assert "https://cdn.other.com/assets/other.js" in cross_origin
+    assert "https://static.example.com/_next/static/app.js" in cross_origin
+
+
+def test_crawl_js_modules_skips_cross_origin_children():
+    base_url = "https://app.example.com"
+    fetched: list[str] = []
+
+    def fake_fetch(url, **kwargs):  # noqa: ARG001
+        fetched.append(url)
+        if url.endswith("/main.js"):
+            body = 'import "/local.js"; import "https://cdn.example.com/child.js";'
+            return http_response(status_code=200, body=body, url=url)
+        if url.endswith("/local.js"):
+            return http_response(status_code=200, body="console.log('ok')", url=url)
+        if url.endswith("/seed.js"):
+            body = 'import "https://cdn.example.com/deeper.js"; import "/still-local.js";'
+            return http_response(status_code=200, body=body, url=url)
+        return http_response(ok=False, status_code=404, body="", url=url)
+
+    modules = crawl_same_origin_js_modules(
+        base_url,
+        ["/main.js", "https://cdn.example.com/seed.js"],
+        fetch=fake_fetch,
+        max_modules=10,
+    )
+
+    assert any(m.url.endswith("/main.js") for m in modules)
+    assert any(m.url.endswith("/local.js") for m in modules)
+    assert any(m.url.endswith("/seed.js") for m in modules)
+    assert not any(url.endswith("/child.js") for url in fetched)
+    assert not any(url.endswith("/deeper.js") for url in fetched)
+    assert not any(url.endswith("/still-local.js") for url in fetched)
 
 
 def test_probe_js_bundles_detects_router(monkeypatch):

@@ -32,7 +32,7 @@ def test_scan_engine_passes_final_url():
     engine = ScanEngine(detection_engine=FakeDetectionEngine(detection_result), vulnerability_engine=FakeVulnEngine(vuln_result))
     request = ScanRequest(url="http://origin")
     report = engine.run(request)
-    assert report.status == PocStatus.NOT_VULNERABLE
+    assert report.status == PocStatus.INCONCLUSIVE
 
 
 def test_build_scan_report_accepts_mapping():

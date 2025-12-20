@@ -10,6 +10,7 @@ from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from urllib.parse import urljoin, urlparse
 
+from ..utils.context import get_http_settings
 from .heuristics import looks_like_html
 from .models import HttpResponse
 from .url import build_base_dir_url, build_endpoint_candidates, same_origin
@@ -32,8 +33,42 @@ _JS_ASSET_LINK_RE = re.compile(
 _JS_ASSET_QUOTED_RE = re.compile(r'["\']([^"\']*\.(?:js|mjs|cjs)(?:\?[^"\']*)?)["\']')
 
 DEFAULT_MAX_JS_ASSETS = 20
-DEFAULT_MAX_JS_BYTES = 2 * 1024 * 1024
+# Default JS scan budget; override via HttpSettings / env vars when needed.
+DEFAULT_MAX_JS_BYTES: int | None = 16 * 1024 * 1024
 
+
+def _resolve_js_asset_cap(max_assets: int | None) -> int | None:
+    """
+    Resolve the JS asset cap, honoring HttpSettings overrides when available.
+    """
+    if max_assets is None or max_assets == DEFAULT_MAX_JS_ASSETS:
+        settings = get_http_settings()
+        candidate = getattr(settings, "max_js_assets", None)
+        if candidate is not None:
+            max_assets = candidate
+    if max_assets is None:
+        return None
+    try:
+        return max(0, int(max_assets))
+    except (TypeError, ValueError):
+        return DEFAULT_MAX_JS_ASSETS
+
+
+def _resolve_js_byte_budget(max_total_bytes: int | None) -> int | None:
+    """
+    Resolve the JS byte budget, honoring HttpSettings overrides when available.
+    """
+    if max_total_bytes is None or max_total_bytes == DEFAULT_MAX_JS_BYTES:
+        settings = get_http_settings()
+        candidate = getattr(settings, "max_js_bytes", None)
+        if candidate is not None:
+            max_total_bytes = candidate
+    if max_total_bytes is None:
+        return None
+    try:
+        return max(0, int(max_total_bytes))
+    except (TypeError, ValueError):
+        return DEFAULT_MAX_JS_BYTES
 
 @dataclass(frozen=True)
 class CrawledJsModule:
@@ -55,13 +90,15 @@ def extract_js_asset_urls(
     *,
     max_assets: int = DEFAULT_MAX_JS_ASSETS,
     include_imports: bool = True,
+    allow_cross_origin_hop: bool = True,
 ) -> list[str]:
     """
-    Extract same-origin JS asset URLs from HTML.
+    Extract JS asset URLs from HTML.
 
     Combines tag-based extraction (`<script src>`, `<link href>`) with a quoted-string fallback
-    to catch inline bootstraps. URLs are normalized to same-origin absolute URLs and sorted by
-    a heuristic priority to reduce bandwidth.
+    to catch inline bootstraps. URLs are normalized to absolute URLs and filtered to same-origin
+    by default, with optional cross-origin inclusion for single-hop checks, then sorted by a
+    heuristic priority to reduce bandwidth.
     """
     if not html or not base_url:
         return []
@@ -83,35 +120,39 @@ def extract_js_asset_urls(
             if match:
                 js_urls.add(match)
 
-    normalized: set[str] = set()
+    candidates: dict[str, bool] = {}
     base_scheme = urlparse(base_url).scheme or "http"
     base_dir = build_base_dir_url(base_url)
 
+    def _record_asset(candidate: str) -> None:
+        if not candidate:
+            return
+        is_same_origin = same_origin(base_url, candidate)
+        if is_same_origin:
+            candidates[candidate] = True
+            return
+        candidates.setdefault(candidate, False)
+
     for js_url in js_urls:
         if js_url.startswith(("http://", "https://")):
-            if same_origin(base_url, js_url):
-                normalized.add(js_url)
+            _record_asset(js_url)
             continue
 
         if js_url.startswith("//"):
             absolute = f"{base_scheme}:{js_url}"
-            if same_origin(base_url, absolute):
-                normalized.add(absolute)
+            _record_asset(absolute)
             continue
 
         if js_url.startswith("/"):
             for candidate in build_endpoint_candidates(base_url, js_url):
-                if same_origin(base_url, candidate):
-                    normalized.add(candidate)
+                _record_asset(candidate)
             continue
 
         # Page-relative: resolve both as file-relative and dir-relative to handle `/app` vs `/app/`.
         primary = urljoin(base_url, js_url)
-        if same_origin(base_url, primary):
-            normalized.add(primary)
+        _record_asset(primary)
         secondary = urljoin(base_dir, js_url)
-        if same_origin(base_url, secondary):
-            normalized.add(secondary)
+        _record_asset(secondary)
 
     def _priority_score(url: str) -> int:
         url_lower = url.lower()
@@ -125,11 +166,20 @@ def extract_js_asset_urls(
             return 3
         return 4
 
-    sorted_urls = sorted(normalized, key=lambda url: (_priority_score(url), url))
-    if max_assets is None:
-        return sorted_urls
-    safe_max = max(0, int(max_assets))
-    return sorted_urls[:safe_max]
+    sorted_urls = sorted(
+        candidates.items(),
+        key=lambda item: (_priority_score(item[0]), 0 if item[1] else 1, item[0]),
+    )
+    max_assets = _resolve_js_asset_cap(max_assets)
+    out: list[str] = []
+    for url, is_same_origin in sorted_urls:
+        if not is_same_origin:
+            if not allow_cross_origin_hop:
+                continue
+        out.append(url)
+        if max_assets is not None and len(out) >= max_assets:
+            break
+    return out
 
 
 def extract_js_import_specs(text: str) -> list[str]:
@@ -149,10 +199,10 @@ def resolve_js_import_candidates(
     spec: str,
 ) -> list[str]:
     """
-    Resolve an import specifier into fetchable same-origin URLs.
+    Resolve an import specifier into fetchable absolute URLs.
 
     Supports:
-    - absolute http(s) URLs (filtered to same-origin)
+    - absolute http(s) URLs
     - root-relative URLs (/assets/app.js)
     - relative URLs (./chunk.js, ../chunk.js)
 
@@ -168,19 +218,19 @@ def resolve_js_import_candidates(
         return []
 
     if raw.startswith(("http://", "https://")):
-        return [raw] if same_origin(base_url, raw) else []
+        return [raw]
 
     if raw.startswith("//"):
         scheme = urlparse(base_url).scheme or "http"
         absolute = f"{scheme}:{raw}"
-        return [absolute] if same_origin(base_url, absolute) else []
+        return [absolute]
 
     if raw.startswith("/"):
-        return [u for u in build_endpoint_candidates(base_url, raw) if same_origin(base_url, u)]
+        return build_endpoint_candidates(base_url, raw)
 
     if raw.startswith((".", "..")):
         joined = urljoin(current_url, raw)
-        return [joined] if same_origin(base_url, joined) else []
+        return [joined]
 
     return []
 
@@ -193,12 +243,13 @@ def crawl_same_origin_js_modules(
     max_modules: int = 20,
     max_total_bytes: int | None = DEFAULT_MAX_JS_BYTES,
     extra_url_patterns: Iterable[re.Pattern[str]] = (),
+    allow_cross_origin_hop: bool = True,
 ) -> list[CrawledJsModule]:
     """
     Crawl same-origin JS modules, following import statements with strict limits.
 
     Safety properties:
-    - same-origin only
+    - same-origin only, with optional cross-origin seeds (no crawling from them)
     - bounded by max_modules
     - skips HTML fallbacks (common for dev servers returning index.html)
     """
@@ -212,40 +263,51 @@ def crawl_same_origin_js_modules(
     base_scheme = urlparse(base_url).scheme or "http"
     base_dir = build_base_dir_url(base_url)
     total_bytes = 0
-    byte_budget = None
-    if max_total_bytes is not None:
-        byte_budget = max(0, int(max_total_bytes))
+    byte_budget = _resolve_js_byte_budget(max_total_bytes)
 
-    def _seed_candidates(raw: str) -> list[str]:
+    queue: list[tuple[str, bool]] = []
+    queued: set[str] = set()
+
+    def _enqueue(candidate: str, *, allow_children: bool) -> None:
+        if not candidate:
+            return
+        if candidate in queued:
+            return
+        if not allow_cross_origin_hop and not same_origin(base_url, candidate):
+            return
+        queue.append((candidate, allow_children))
+        queued.add(candidate)
+
+    def _seed_candidates(raw: str) -> None:
         text = str(raw or "").strip()
         if not text:
-            return []
+            return
         if text.startswith(("http://", "https://")):
-            return [text] if same_origin(base_url, text) else []
+            _enqueue(text, allow_children=same_origin(base_url, text))
+            return
         if text.startswith("//"):
             absolute = f"{base_scheme}:{text}"
-            return [absolute] if same_origin(base_url, absolute) else []
+            _enqueue(absolute, allow_children=same_origin(base_url, absolute))
+            return
         if text.startswith("/"):
-            return resolve_js_import_candidates(base_url, base_url, text)
+            for candidate in resolve_js_import_candidates(base_url, base_url, text):
+                _enqueue(candidate, allow_children=True)
+            return
         # page-relative: resolve both as file-relative and dir-relative.
         primary = urljoin(base_url, text)
         secondary = urljoin(base_dir, text)
-        out: list[str] = []
         for candidate in (primary, secondary):
-            if candidate and same_origin(base_url, candidate):
-                out.append(candidate)
-        return list(dict.fromkeys(out))
+            _enqueue(candidate, allow_children=True)
 
-    queue: list[str] = []
     for seed in seeds:
-        queue.extend(_seed_candidates(seed))
+        _seed_candidates(seed)
 
     visited: set[str] = set()
     out: list[CrawledJsModule] = []
 
     idx = 0
     while idx < len(queue) and len(visited) < max_modules:
-        module_url = queue[idx]
+        module_url, allow_children = queue[idx]
         idx += 1
         if module_url in visited:
             continue
@@ -257,7 +319,7 @@ def crawl_same_origin_js_modules(
 
         final_url = str(resp.url or module_url)
         if final_url and not same_origin(base_url, final_url):
-            continue
+            allow_children = False
 
         raw_headers = resp.headers or {}
         headers: dict[str, str] = {}
@@ -278,30 +340,37 @@ def crawl_same_origin_js_modules(
 
         out.append(CrawledJsModule(url=module_url, final_url=final_url or module_url, headers=headers, body=body))
 
-        for spec in extract_js_import_specs(body):
-            for candidate in resolve_js_import_candidates(base_url, final_url or module_url, spec):
-                if candidate and candidate not in visited:
-                    queue.append(candidate)
+        if allow_children:
+            for spec in extract_js_import_specs(body):
+                for candidate in resolve_js_import_candidates(base_url, final_url or module_url, spec):
+                    if candidate and same_origin(base_url, candidate) and candidate not in visited:
+                        _enqueue(candidate, allow_children=True)
 
-        for pattern in extra_url_patterns:
-            try:
-                matches = pattern.findall(body)
-            except Exception:
-                continue
-            for match in matches:
-                raw_match = match[0] if isinstance(match, tuple) else match
-                if not raw_match:
+            for pattern in extra_url_patterns:
+                try:
+                    matches = pattern.findall(body)
+                except Exception:
                     continue
-                for candidate in resolve_js_import_candidates(base_url, final_url or module_url, str(raw_match)):
-                    if candidate and candidate not in visited:
-                        queue.append(candidate)
+                for match in matches:
+                    raw_match = match[0] if isinstance(match, tuple) else match
+                    if not raw_match:
+                        continue
+                    for candidate in resolve_js_import_candidates(base_url, final_url or module_url, str(raw_match)):
+                        if candidate and same_origin(base_url, candidate) and candidate not in visited:
+                            _enqueue(candidate, allow_children=True)
 
     return out
 
 
-def extract_js_urls(html: str, base_url: str, *, max_assets: int = DEFAULT_MAX_JS_ASSETS) -> list[str]:
+def extract_js_urls(
+    html: str,
+    base_url: str,
+    *,
+    max_assets: int = DEFAULT_MAX_JS_ASSETS,
+    allow_cross_origin_hop: bool = True,
+) -> list[str]:
     """Backward-compatible alias for extract_js_asset_urls."""
-    return extract_js_asset_urls(html, base_url, max_assets=max_assets)
+    return extract_js_asset_urls(html, base_url, max_assets=max_assets, allow_cross_origin_hop=allow_cross_origin_hop)
 
 
 __all__ = [
@@ -309,6 +378,8 @@ __all__ = [
     "crawl_same_origin_js_modules",
     "DEFAULT_MAX_JS_ASSETS",
     "DEFAULT_MAX_JS_BYTES",
+    "_resolve_js_asset_cap",
+    "_resolve_js_byte_budget",
     "extract_js_import_specs",
     "extract_js_asset_urls",
     "extract_js_urls",
