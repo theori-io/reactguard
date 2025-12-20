@@ -145,6 +145,53 @@ def test_dec2025_detector_returns_not_vulnerable_when_surface_closed():
     assert result.details["reason_code"] == MISSING_SURFACE_REASON_CODE
 
 
+def test_dec2025_detector_marks_missing_surface_when_fingerprint_missing(monkeypatch):
+    detection = FrameworkDetectionResult(
+        tags=[TAG_REACT_ROUTER_V7, TAG_REACT_STREAMING],
+        signals={SIG_DETECTION_CONFIDENCE_LEVEL: "medium"},
+    )
+
+    monkeypatch.setattr(
+        "reactguard.vulnerability_detection.cves._rsc_dec2025_base.run_assessor_with_context",
+        lambda *_args, **_kwargs: {
+            "status": PocStatus.INCONCLUSIVE,
+            "details": {"cve_id": "CVE-2025-55184", "confidence": "low", "reason": "stub"},
+            "raw_data": {"evidence": {"reason": "No candidate Flight protocol endpoints discovered"}},
+        },
+    )
+
+    result = CVE202555184VulnerabilityDetector().evaluate("http://example", detection_result=detection)
+    assert result.status == PocStatus.LIKELY_NOT_VULNERABLE
+    assert result.details["reason_code"] == MISSING_SURFACE_REASON_CODE
+    assert result.details["reason"] == "No reachable Flight protocol payload deserialization surface detected"
+
+
+def test_dec2025_detector_marks_missing_surface_when_action_id_required(monkeypatch):
+    detection = FrameworkDetectionResult(
+        tags=[TAG_NEXTJS, TAG_REACT_STREAMING],
+        signals={SIG_DETECTION_CONFIDENCE_LEVEL: "medium"},
+    )
+
+    monkeypatch.setattr(
+        "reactguard.vulnerability_detection.cves._rsc_dec2025_base.run_assessor_with_context",
+        lambda *_args, **_kwargs: {
+            "status": PocStatus.INCONCLUSIVE,
+            "details": {"cve_id": "CVE-2025-55184", "confidence": "low", "reason": "stub"},
+            "raw_data": {
+                "evidence": {
+                    "reason": "No reachable Flight protocol payload deserialization surface found (HTML/timeouts)",
+                    "needs_valid_action_id": True,
+                }
+            },
+        },
+    )
+
+    result = CVE202555184VulnerabilityDetector().evaluate("http://example", detection_result=detection)
+    assert result.status == PocStatus.LIKELY_NOT_VULNERABLE
+    assert result.details["reason_code"] == MISSING_SURFACE_REASON_CODE
+    assert result.details["reason"] == "No reachable Flight protocol payload deserialization surface detected"
+
+
 def test_dec2025_detector_short_circuits_on_react18():
     detection = FrameworkDetectionResult(
         tags=[TAG_RSC],
