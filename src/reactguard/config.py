@@ -34,6 +34,17 @@ def _bool_env(name: str, default: bool) -> bool:
     return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _optional_int_env(name: str, default: int | None) -> int | None:
+    try:
+        value = os.getenv(name)
+        if value is None:
+            return default
+        parsed = int(value)
+        return parsed if parsed > 0 else None
+    except ValueError:
+        return default
+
+
 @dataclass
 class HttpSettings:
     """HTTP client defaults."""
@@ -48,6 +59,8 @@ class HttpSettings:
     allow_redirects: bool = True
     verify_ssl: bool = True
     max_body_bytes: int = 16 * 1024 * 1024
+    max_js_bytes: int | None = 16 * 1024 * 1024
+    max_js_assets: int | None = 20
 
     @classmethod
     def from_env(cls) -> "HttpSettings":
@@ -55,6 +68,8 @@ class HttpSettings:
         max_body_bytes = _int_env("REACTGUARD_HTTP_MAX_BODY_BYTES", cls.max_body_bytes)
         if max_body_bytes <= 0:
             max_body_bytes = cls.max_body_bytes
+        max_js_bytes = _optional_int_env("REACTGUARD_JS_MAX_BYTES", cls.max_js_bytes)
+        max_js_assets = _optional_int_env("REACTGUARD_JS_MAX_ASSETS", cls.max_js_assets)
         return cls(
             timeout=_float_env("REACTGUARD_HTTP_TIMEOUT", cls.timeout),
             max_retries=_int_env("REACTGUARD_HTTP_RETRIES", cls.max_retries),
@@ -66,6 +81,8 @@ class HttpSettings:
             allow_redirects=_bool_env("REACTGUARD_HTTP_REDIRECTS", cls.allow_redirects),
             verify_ssl=_bool_env("REACTGUARD_HTTP_VERIFY_SSL", cls.verify_ssl),
             max_body_bytes=max_body_bytes,
+            max_js_bytes=max_js_bytes,
+            max_js_assets=max_js_assets,
         )
 
 

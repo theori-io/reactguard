@@ -35,6 +35,17 @@ def test_extract_js_urls_normalizes_and_prioritizes():
     assert not any(u.startswith("http://cdn.example.com") for u in urls)
 
 
+def test_extract_js_urls_allows_same_site_subdomains():
+    base_url = "https://app.example.com"
+    body = """
+    <script src="https://static.example.com/assets/app.js"></script>
+    <script src="https://cdn.other.com/assets/other.js"></script>
+    """
+    urls = extract_js_asset_urls(body, base_url, allow_same_site=True)
+    assert any("static.example.com" in u for u in urls)
+    assert not any("cdn.other.com" in u for u in urls)
+
+
 def test_probe_js_bundles_detects_router(monkeypatch):
     calls = []
 

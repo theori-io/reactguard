@@ -10,7 +10,7 @@ from dataclasses import dataclass
 
 from ...http import request_with_retries
 from ...http.url import build_endpoint_candidates
-from ...http.js import DEFAULT_MAX_JS_ASSETS, DEFAULT_MAX_JS_BYTES, extract_js_asset_urls
+from ...http.js import DEFAULT_MAX_JS_ASSETS, DEFAULT_MAX_JS_BYTES, _resolve_js_byte_budget, extract_js_asset_urls
 
 _FORM_BLOCK_RE = re.compile(r"<form\b(?P<attrs>[^>]*)>(?P<body>.*?)</form>", re.IGNORECASE | re.DOTALL)
 _FORM_ACTION_RE = re.compile(r"\baction\s*=\s*(?:[\"']([^\"']*)[\"']|([^\s>]+))", re.IGNORECASE)
@@ -36,6 +36,7 @@ def _scan_action_ids_from_bundles(
 ) -> list[str]:
     action_ids: list[str] = []
     total_bytes = 0
+    byte_budget = _resolve_js_byte_budget(DEFAULT_MAX_JS_BYTES)
     for asset_url in extract_js_asset_urls(html, base_url, max_assets=max_assets):
         resp = request_with_retries(
             asset_url,
@@ -48,7 +49,7 @@ def _scan_action_ids_from_bundles(
         if not body:
             continue
         total_bytes += len(body)
-        if DEFAULT_MAX_JS_BYTES and total_bytes > DEFAULT_MAX_JS_BYTES:
+        if byte_budget is not None and total_bytes > byte_budget:
             return action_ids
         for match in _ACTION_ID_BUNDLE_RE.finditer(body):
             aid = match.group(1)

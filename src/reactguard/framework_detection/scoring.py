@@ -24,6 +24,7 @@ from .keys import (
     SIG_REACT_SPA_STRUCTURE,
     SIG_REACT_STREAMING_MARKERS,
     SIG_RSC_CONTENT_TYPE,
+    SIG_RSC_FLIGHT_PAYLOAD_HTML_WRAPPED,
     SIG_RSC_FLIGHT_PAYLOAD,
     SIG_VITE_ASSETS,
     SIG_VITE_MODULEPRELOAD_ASSETS,
@@ -37,8 +38,6 @@ from .keys import (
     SIG_WAKU_VARS,
 )
 
-# Default weights derived from lab container observations; confidence_config.json
-# can override these for experimentation without code changes.
 STRONG_SIGNAL_WEIGHTS: dict[str, int] = {
     # Next.js
     SIG_NEXTJS_HYDRATION_ARRAY: 25,
@@ -81,6 +80,7 @@ SUPPORTING_SIGNAL_WEIGHTS: dict[str, int] = {
     SIG_VITE_MODULEPRELOAD_ASSETS: 6,
     SIG_REACT_SPA_STRUCTURE: 4,
     SIG_REACT_STREAMING_MARKERS: 6,
+    SIG_RSC_FLIGHT_PAYLOAD_HTML_WRAPPED: 4,
 }
 
 

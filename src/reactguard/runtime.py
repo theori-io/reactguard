@@ -17,7 +17,7 @@ from .models import (
     VulnerabilityReport,
 )
 from .scan.engine import ScanEngine
-from .utils.context import scan_context
+from .utils.context import ensure_scan_extra, get_scan_context, scan_context
 from .vulnerability_detection.engine import VulnerabilityDetectionEngine
 
 
@@ -57,9 +57,12 @@ class ReactGuard:
             proxy_profile=proxy_profile,
             correlation_id=correlation_id,
         )
+        context_extra = get_scan_context().extra
+        extra, _ = ensure_scan_extra(url, extra=context_extra if isinstance(context_extra, dict) else None, reset=True)
         with scan_context(
             http_client=self.http_client,
             http_settings=self.http_settings,
+            extra=extra,
             proxy_profile=proxy_profile,
             correlation_id=correlation_id,
         ):
@@ -73,9 +76,12 @@ class ReactGuard:
         proxy_profile: str | None = None,
         correlation_id: str | None = None,
     ) -> list[VulnerabilityReport]:
+        context_extra = get_scan_context().extra
+        extra, _ = ensure_scan_extra(url, extra=context_extra if isinstance(context_extra, dict) else None, reset=True)
         with scan_context(
             http_client=self.http_client,
             http_settings=self.http_settings,
+            extra=extra,
             proxy_profile=proxy_profile,
             correlation_id=correlation_id,
         ):
@@ -99,9 +105,12 @@ class ReactGuard:
         correlation_id: str | None = None,
     ) -> ScanReport:
         request = ScanRequest(url=url, proxy_profile=proxy_profile, correlation_id=correlation_id)
+        context_extra = get_scan_context().extra
+        extra, _ = ensure_scan_extra(url, extra=context_extra if isinstance(context_extra, dict) else None, reset=True)
         with scan_context(
             http_client=self.http_client,
             http_settings=self.http_settings,
+            extra=extra,
             proxy_profile=proxy_profile,
             correlation_id=correlation_id,
         ):

@@ -5,11 +5,13 @@
 
 from __future__ import annotations
 
+import ipaddress
 import re
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from urllib.parse import urljoin, urlparse
 
+from ..utils.context import get_http_settings
 from .heuristics import looks_like_html
 from .models import HttpResponse
 from .url import build_base_dir_url, build_endpoint_candidates, same_origin
@@ -32,7 +34,103 @@ _JS_ASSET_LINK_RE = re.compile(
 _JS_ASSET_QUOTED_RE = re.compile(r'["\']([^"\']*\.(?:js|mjs|cjs)(?:\?[^"\']*)?)["\']')
 
 DEFAULT_MAX_JS_ASSETS = 20
-DEFAULT_MAX_JS_BYTES = 2 * 1024 * 1024
+# Default JS scan budget; override via HttpSettings / env vars when needed.
+DEFAULT_MAX_JS_BYTES: int | None = 16 * 1024 * 1024
+
+
+def _resolve_js_asset_cap(max_assets: int | None) -> int | None:
+    """
+    Resolve the JS asset cap, honoring HttpSettings overrides when available.
+    """
+    if max_assets is None or max_assets == DEFAULT_MAX_JS_ASSETS:
+        settings = get_http_settings()
+        candidate = getattr(settings, "max_js_assets", None)
+        if candidate is not None:
+            max_assets = candidate
+    if max_assets is None:
+        return None
+    try:
+        return max(0, int(max_assets))
+    except (TypeError, ValueError):
+        return DEFAULT_MAX_JS_ASSETS
+
+
+def _resolve_js_byte_budget(max_total_bytes: int | None) -> int | None:
+    """
+    Resolve the JS byte budget, honoring HttpSettings overrides when available.
+    """
+    if max_total_bytes is None or max_total_bytes == DEFAULT_MAX_JS_BYTES:
+        settings = get_http_settings()
+        candidate = getattr(settings, "max_js_bytes", None)
+        if candidate is not None:
+            max_total_bytes = candidate
+    if max_total_bytes is None:
+        return None
+    try:
+        return max(0, int(max_total_bytes))
+    except (TypeError, ValueError):
+        return DEFAULT_MAX_JS_BYTES
+
+_MULTI_LABEL_PUBLIC_SUFFIXES = {
+    "co.uk",
+    "org.uk",
+    "ac.uk",
+    "gov.uk",
+    "co.jp",
+    "ne.jp",
+    "or.jp",
+    "com.au",
+    "net.au",
+    "org.au",
+    "edu.au",
+    "gov.au",
+    "co.nz",
+    "org.nz",
+    "net.nz",
+    "com.br",
+    "com.cn",
+    "com.hk",
+    "com.sg",
+    "com.tw",
+    "com.mx",
+    "com.tr",
+    "com.sa",
+    "com.ar",
+    "com.es",
+    "com.fr",
+    "com.de",
+}
+
+
+def _is_ip_host(host: str) -> bool:
+    try:
+        ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    return True
+
+
+def _registrable_domain(host: str) -> str:
+    host = str(host or "").strip(".").lower()
+    if not host:
+        return ""
+    if host == "localhost" or _is_ip_host(host):
+        return host
+    parts = host.split(".")
+    if len(parts) <= 2:
+        return host
+    suffix2 = ".".join(parts[-2:])
+    if suffix2 in _MULTI_LABEL_PUBLIC_SUFFIXES and len(parts) >= 3:
+        return ".".join(parts[-3:])
+    return suffix2
+
+
+def _same_site(base_url: str, other_url: str) -> bool:
+    base_host = urlparse(str(base_url or "")).hostname or ""
+    other_host = urlparse(str(other_url or "")).hostname or ""
+    if not base_host or not other_host:
+        return False
+    return _registrable_domain(base_host) == _registrable_domain(other_host)
 
 
 @dataclass(frozen=True)
@@ -55,13 +153,14 @@ def extract_js_asset_urls(
     *,
     max_assets: int = DEFAULT_MAX_JS_ASSETS,
     include_imports: bool = True,
+    allow_same_site: bool = False,
 ) -> list[str]:
     """
-    Extract same-origin JS asset URLs from HTML.
+    Extract JS asset URLs from HTML.
 
     Combines tag-based extraction (`<script src>`, `<link href>`) with a quoted-string fallback
-    to catch inline bootstraps. URLs are normalized to same-origin absolute URLs and sorted by
-    a heuristic priority to reduce bandwidth.
+    to catch inline bootstraps. URLs are normalized to same-origin (or same-site when enabled)
+    absolute URLs and sorted by a heuristic priority to reduce bandwidth.
     """
     if not html or not base_url:
         return []
@@ -87,30 +186,35 @@ def extract_js_asset_urls(
     base_scheme = urlparse(base_url).scheme or "http"
     base_dir = build_base_dir_url(base_url)
 
+    def _allow_asset(candidate: str) -> bool:
+        if same_origin(base_url, candidate):
+            return True
+        return bool(allow_same_site and _same_site(base_url, candidate))
+
     for js_url in js_urls:
         if js_url.startswith(("http://", "https://")):
-            if same_origin(base_url, js_url):
+            if _allow_asset(js_url):
                 normalized.add(js_url)
             continue
 
         if js_url.startswith("//"):
             absolute = f"{base_scheme}:{js_url}"
-            if same_origin(base_url, absolute):
+            if _allow_asset(absolute):
                 normalized.add(absolute)
             continue
 
         if js_url.startswith("/"):
             for candidate in build_endpoint_candidates(base_url, js_url):
-                if same_origin(base_url, candidate):
+                if _allow_asset(candidate):
                     normalized.add(candidate)
             continue
 
         # Page-relative: resolve both as file-relative and dir-relative to handle `/app` vs `/app/`.
         primary = urljoin(base_url, js_url)
-        if same_origin(base_url, primary):
+        if _allow_asset(primary):
             normalized.add(primary)
         secondary = urljoin(base_dir, js_url)
-        if same_origin(base_url, secondary):
+        if _allow_asset(secondary):
             normalized.add(secondary)
 
     def _priority_score(url: str) -> int:
@@ -126,10 +230,10 @@ def extract_js_asset_urls(
         return 4
 
     sorted_urls = sorted(normalized, key=lambda url: (_priority_score(url), url))
+    max_assets = _resolve_js_asset_cap(max_assets)
     if max_assets is None:
         return sorted_urls
-    safe_max = max(0, int(max_assets))
-    return sorted_urls[:safe_max]
+    return sorted_urls[:max_assets]
 
 
 def extract_js_import_specs(text: str) -> list[str]:
@@ -212,9 +316,7 @@ def crawl_same_origin_js_modules(
     base_scheme = urlparse(base_url).scheme or "http"
     base_dir = build_base_dir_url(base_url)
     total_bytes = 0
-    byte_budget = None
-    if max_total_bytes is not None:
-        byte_budget = max(0, int(max_total_bytes))
+    byte_budget = _resolve_js_byte_budget(max_total_bytes)
 
     def _seed_candidates(raw: str) -> list[str]:
         text = str(raw or "").strip()
@@ -299,9 +401,15 @@ def crawl_same_origin_js_modules(
     return out
 
 
-def extract_js_urls(html: str, base_url: str, *, max_assets: int = DEFAULT_MAX_JS_ASSETS) -> list[str]:
+def extract_js_urls(
+    html: str,
+    base_url: str,
+    *,
+    max_assets: int = DEFAULT_MAX_JS_ASSETS,
+    allow_same_site: bool = False,
+) -> list[str]:
     """Backward-compatible alias for extract_js_asset_urls."""
-    return extract_js_asset_urls(html, base_url, max_assets=max_assets)
+    return extract_js_asset_urls(html, base_url, max_assets=max_assets, allow_same_site=allow_same_site)
 
 
 __all__ = [
@@ -309,6 +417,8 @@ __all__ = [
     "crawl_same_origin_js_modules",
     "DEFAULT_MAX_JS_ASSETS",
     "DEFAULT_MAX_JS_BYTES",
+    "_resolve_js_asset_cap",
+    "_resolve_js_byte_budget",
     "extract_js_import_specs",
     "extract_js_asset_urls",
     "extract_js_urls",

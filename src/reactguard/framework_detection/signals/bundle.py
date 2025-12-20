@@ -8,7 +8,7 @@ from collections.abc import Iterable
 from typing import Any
 from ...http import request_with_retries
 from ...http.headers import normalize_headers
-from ...http.js import DEFAULT_MAX_JS_BYTES, extract_js_asset_urls
+from ...http.js import DEFAULT_MAX_JS_BYTES, _resolve_js_byte_budget, extract_js_asset_urls
 from ...utils import (
     DetectedVersion,
     derive_react_major,
@@ -39,8 +39,10 @@ def _probe_js_bundles_ctx(url: str, body: str) -> dict[str, object]:
     signals: dict[str, object] = {}
     bundle_versions: dict[str, DetectedVersion] = {}
 
-    all_js_urls = extract_js_asset_urls(body, url)
+    all_js_urls = extract_js_asset_urls(body, url, allow_same_site=True)
     total_bytes = 0
+    byte_budget = _resolve_js_byte_budget(DEFAULT_MAX_JS_BYTES)
+    used_extra_budget = False
 
     for script_src in all_js_urls:
         scan = request_with_retries(
@@ -51,8 +53,15 @@ def _probe_js_bundles_ctx(url: str, body: str) -> dict[str, object]:
             continue
         js_content = scan.text or scan.body_snippet or ""
         total_bytes += len(js_content)
-        if DEFAULT_MAX_JS_BYTES and total_bytes > DEFAULT_MAX_JS_BYTES:
-            break
+        stop_after = False
+        if byte_budget is not None and total_bytes > byte_budget:
+            # Allow one extra prioritized chunk if no version markers found yet.
+            has_any_version = bool(bundle_versions.get("react_version") or bundle_versions.get("rsc_runtime_version"))
+            if not has_any_version and not used_extra_budget:
+                used_extra_budget = True
+                byte_budget = total_bytes
+            else:
+                stop_after = True
         js_headers = normalize_headers(scan.headers)
 
         try:
@@ -122,6 +131,8 @@ def _probe_js_bundles_ctx(url: str, body: str) -> dict[str, object]:
         has_any_framework_hint = bool(has_react_router_pkg or has_expo_router)
         has_any_version = bool(bundle_versions.get("react_version") or bundle_versions.get("rsc_runtime_version"))
         if has_any_framework_hint and has_any_version:
+            break
+        if stop_after:
             break
 
     # Derive `react_major` from the selected version pick to avoid inconsistent (react_version != react_major)

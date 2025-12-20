@@ -26,7 +26,7 @@ from ..utils import (
     parse_semver,
     version_map_from_signals,
 )
-from ..utils.context import get_http_settings, get_scan_context, scan_context
+from ..utils.context import ensure_scan_extra, get_http_settings, get_scan_context, register_scan_target, scan_context
 from .base import DetectionContext, DetectionState
 from .keys import (
     SIG_DETECTION_CONFIDENCE,
@@ -63,7 +63,7 @@ class FrameworkDetectionEngine:
     def detect(self, request: ScanRequest) -> FrameworkDetectionResult:
         context = get_scan_context()
         needs_http_client = context.http_client is None
-        needs_extra = not isinstance(context.extra, dict)
+        extra, needs_extra = ensure_scan_extra(request.url, extra=context.extra if isinstance(context.extra, dict) else None)
         needs_settings = context.http_settings is None
 
         if needs_http_client or needs_extra or needs_settings:
@@ -79,7 +79,7 @@ class FrameworkDetectionEngine:
             if needs_settings:
                 overrides["http_settings"] = get_http_settings()
             if needs_extra:
-                overrides["extra"] = {}
+                overrides["extra"] = extra
             with scan_context(**overrides):
                 return self._detect_ctx(request)
         return self._detect_ctx(request)
@@ -89,6 +89,7 @@ class FrameworkDetectionEngine:
         signals = self._initial_signals(response)
         if response and response.url:
             signals[SIG_FINAL_URL] = response.url
+            register_scan_target(response.url)
         headers = self._normalize_headers(request, response)
         body = self._resolve_body(request, response)
         tags = TagSet()
