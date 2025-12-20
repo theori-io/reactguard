@@ -2,8 +2,24 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
 from reactguard.framework_detection.signals import bundle, expo_server_functions, react_router_server_functions, rsc, server_actions, waku
+from reactguard.http.js import extract_js_asset_urls
+from reactguard.http.models import HttpResponse
 from reactguard.utils.context import scan_context
 from reactguard.utils.tag_manager import TagSet
+
+
+def http_response(*, ok=True, status_code=200, body="", headers=None, url=None, error_message=None, error_type=None):
+    text = str(body or "")
+    return HttpResponse(
+        ok=ok,
+        status_code=status_code,
+        headers=headers or {},
+        text=text,
+        content=text.encode(),
+        url=url,
+        error_message=error_message,
+        error_type=error_type,
+    )
 
 
 def test_extract_js_urls_normalizes_and_prioritizes():
@@ -13,7 +29,7 @@ def test_extract_js_urls_normalizes_and_prioritizes():
     <script src="main.js"></script>
     <script src="//cdn.example.com/lib.js"></script>
     """
-    urls = bundle.extract_js_urls(body, base_url)
+    urls = extract_js_asset_urls(body, base_url)
     assert urls[0].startswith("http://example/_next/static")
     assert any(u.startswith("http://example/app/main.js") for u in urls)
     assert not any(u.startswith("http://cdn.example.com") for u in urls)
@@ -24,7 +40,7 @@ def test_probe_js_bundles_detects_router(monkeypatch):
 
     def fake_scan(url, **kwargs):  # noqa: ARG001
         calls.append(url)
-        return {"ok": True, "status_code": 200, "body": '__reactRouterManifest "react-router@7.0.0"', "headers": {}}
+        return http_response(status_code=200, body='__reactRouterManifest "react-router@7.0.0"')
 
     monkeypatch.setattr(bundle, "request_with_retries", fake_scan)
     signals = bundle.probe_js_bundles("http://example", '<script src="/_next/static/chunk.js"></script>')
@@ -41,10 +57,10 @@ def test_probe_js_bundles_derives_react_major_from_selected_version(monkeypatch)
 
     def fake_scan(url, **kwargs):  # noqa: ARG001
         if url.endswith("a.js"):
-            return {"ok": True, "status_code": 200, "body": "react@18.2.0", "headers": {}}
+            return http_response(status_code=200, body="react@18.2.0")
         if url.endswith("b.js"):
-            return {"ok": True, "status_code": 200, "body": "react@19.2.0", "headers": {}}
-        return {"ok": False, "status_code": 404, "body": "", "headers": {}}
+            return http_response(status_code=200, body="react@19.2.0")
+        return http_response(ok=False, status_code=404, body="")
 
     monkeypatch.setattr(bundle, "request_with_retries", fake_scan)
     html = '<script src="/a.js"></script><script src="/b.js"></script>'
@@ -58,7 +74,7 @@ def test_probe_js_bundles_caches_within_scan(monkeypatch):
 
     def fake_scan(url, **kwargs):  # noqa: ARG001
         calls.append(url)
-        return {"ok": True, "status_code": 200, "body": "react@19.0.0", "headers": {}}
+        return http_response(status_code=200, body="react@19.0.0")
 
     monkeypatch.setattr(bundle, "request_with_retries", fake_scan)
     html = '<script src="/a.js"></script>'
@@ -92,8 +108,8 @@ def test_discover_react_router_server_functions_falls_back_to_bundle_scan(monkey
     def fake_scan(url, **kwargs):  # noqa: ARG001
         if url.endswith("/assets/app.js"):
             body = 'const x = "$ACTION_ID_abcd#run";'
-            return {"ok": True, "status_code": 200, "headers": {"content-type": "application/javascript"}, "body": body, "body_snippet": body, "url": url}
-        return {"ok": False, "status_code": 404, "headers": {}, "body": "", "body_snippet": "", "url": url}
+            return http_response(status_code=200, body=body, headers={"content-type": "application/javascript"}, url=url)
+        return http_response(ok=False, status_code=404, body="", url=url)
 
     monkeypatch.setattr(react_router_server_functions, "request_with_retries", fake_scan)
     discovery = react_router_server_functions.discover_react_router_server_functions(html, "http://example/app")
@@ -112,10 +128,10 @@ def test_probe_expo_server_functions_discovers_action_endpoint(monkeypatch):
 
     def fake_scan(url, **kwargs):  # noqa: ARG001
         if url.endswith("/_flight/web/index.txt"):
-            return {"ok": True, "status_code": 200, "headers": {"content-type": "text/plain"}, "body": flight_body, "body_snippet": flight_body, "url": url}
+            return http_response(status_code=200, body=flight_body, headers={"content-type": "text/plain"}, url=url)
         if "CallServerFunction.tsx.bundle" in url:
-            return {"ok": True, "status_code": 200, "headers": {"content-type": "application/javascript"}, "body": bundle_body, "body_snippet": bundle_body, "url": url}
-        return {"ok": False, "status_code": 404, "headers": {}, "body": "", "body_snippet": "", "url": url}
+            return http_response(status_code=200, body=bundle_body, headers={"content-type": "application/javascript"}, url=url)
+        return http_response(ok=False, status_code=404, body="", url=url)
 
     monkeypatch.setattr(expo_server_functions, "request_with_retries", fake_scan)
     result = expo_server_functions.probe_expo_server_functions("http://example/app")
@@ -128,7 +144,7 @@ def test_probe_rsc_endpoint_and_actions(monkeypatch):
 
     def fake_scan(url, **kwargs):  # noqa: ARG001
         calls.append(url)
-        return {"ok": True, "status_code": 200, "headers": {"content-type": "text/x-component"}, "body": "0:[", "body_snippet": "0:["}
+        return http_response(status_code=200, body="0:[", headers={"content-type": "text/x-component"})
 
     monkeypatch.setattr(rsc, "request_with_retries", fake_scan)
     assert rsc.probe_rsc_endpoint("http://example") is True
@@ -168,13 +184,11 @@ def test_probe_server_actions_support_reads_rsc(monkeypatch):
     monkeypatch.setattr(
         server_actions,
         "send_rsc_request",
-        lambda *_, **__: {
-            "ok": True,
-            "status_code": 200,
-            "headers": {"content-type": "text/x-component", "vary": "RSC", "x-nextjs-action-not-found": "1"},
-            "body": '0:{"a":"$@"}',
-            "body_snippet": '0:{"a":"$@"}',
-        },
+        lambda *_, **__: http_response(
+            status_code=200,
+            body='0:{"a":"$@"}',
+            headers={"content-type": "text/x-component", "vary": "RSC", "x-nextjs-action-not-found": "1"},
+        ),
     )
     result = server_actions.probe_server_actions_support("http://example")
     assert result["supported"] is True
@@ -187,13 +201,7 @@ def test_probe_server_actions_support_uses_vary_rsc_when_body_is_empty(monkeypat
     monkeypatch.setattr(
         server_actions,
         "send_rsc_request",
-        lambda *_, **__: {
-            "ok": True,
-            "status_code": 200,
-            "headers": {"vary": "RSC"},
-            "body": "",
-            "body_snippet": "",
-        },
+        lambda *_, **__: http_response(status_code=200, body="", headers={"vary": "RSC"}),
     )
     result = server_actions.probe_server_actions_support("http://example")
     assert result["supported"] is True
@@ -205,17 +213,23 @@ def test_probe_server_actions_support_does_not_use_vary_rsc_on_404(monkeypatch):
     monkeypatch.setattr(
         server_actions,
         "send_rsc_request",
-        lambda *_, **__: {
-            "ok": True,
-            "status_code": 404,
-            "headers": {"vary": "RSC", "content-type": "text/plain"},
-            "body": "Not Found",
-            "body_snippet": "Not Found",
-        },
+        lambda *_, **__: http_response(status_code=404, body="Not Found", headers={"vary": "RSC", "content-type": "text/plain"}),
     )
     result = server_actions.probe_server_actions_support("http://example")
     assert result["supported"] is False
     assert result["vary_has_rsc"] is True
+
+
+def test_probe_server_actions_support_does_not_treat_plain_json_as_strong_signal(monkeypatch):
+    monkeypatch.setattr(
+        server_actions,
+        "send_rsc_request",
+        lambda *_, **__: http_response(status_code=200, body='{"error":"nope"}', headers={"content-type": "application/json"}),
+    )
+    result = server_actions.probe_server_actions_support("http://example")
+    assert result["supported"] is False
+    assert result["has_action_content_type"] is False
+    assert result["has_digest"] is False
 
 
 def test_apply_server_actions_probe_results_sets_tags():
@@ -259,10 +273,10 @@ def test_apply_server_actions_probe_results_sets_tags():
 def test_probe_waku_rsc_surface_and_minimal_html(monkeypatch):
     def fake_scan(url, **kwargs):  # noqa: ARG001
         if url.endswith("/RSC/_"):
-            return {"ok": True, "status_code": 200, "headers": {"content-type": "text/x-component"}, "body": "0:[", "body_snippet": "0:["}
+            return http_response(status_code=200, body="0:[", headers={"content-type": "text/x-component"})
         if url.endswith("/assets/index.js"):
-            return {"ok": True, "status_code": 200, "headers": {"content-type": "application/javascript"}, "body": "globalThis.__WAKU_HYDRATE__=true;", "body_snippet": ""}
-        return {"ok": False, "status_code": 404, "headers": {}, "body": "", "body_snippet": ""}
+            return http_response(status_code=200, body="globalThis.__WAKU_HYDRATE__=true;", headers={"content-type": "application/javascript"})
+        return http_response(ok=False, status_code=404, body="")
 
     monkeypatch.setattr(waku, "request_with_retries", fake_scan)
     assert waku.probe_waku_rsc_surface("http://example")
@@ -283,13 +297,12 @@ def test_probe_waku_rsc_surface_rejects_plaintext_404(monkeypatch):
     monkeypatch.setattr(
         waku,
         "request_with_retries",
-        lambda url, **kwargs: {  # noqa: ARG001
-            "ok": True,
-            "status_code": 404,
-            "headers": {"content-type": "text/plain"},
-            "body": "Not Found",
-            "body_snippet": "Not Found",
-        },
+        lambda url, **kwargs: http_response(  # noqa: ARG001
+            ok=True,
+            status_code=404,
+            body="Not Found",
+            headers={"content-type": "text/plain"},
+        ),
     )
     assert waku.probe_waku_rsc_surface("http://example") is False
 
@@ -298,26 +311,24 @@ def test_probe_waku_rsc_surface_requires_flight_for_text_plain(monkeypatch):
     monkeypatch.setattr(
         waku,
         "request_with_retries",
-        lambda url, **kwargs: {  # noqa: ARG001
-            "ok": True,
-            "status_code": 200,
-            "headers": {"content-type": "text/plain"},
-            "body": "Not Found",
-            "body_snippet": "Not Found",
-        },
+        lambda url, **kwargs: http_response(  # noqa: ARG001
+            ok=True,
+            status_code=200,
+            body="Not Found",
+            headers={"content-type": "text/plain"},
+        ),
     )
     assert waku.probe_waku_rsc_surface("http://example") is False
 
     monkeypatch.setattr(
         waku,
         "request_with_retries",
-        lambda url, **kwargs: {  # noqa: ARG001
-            "ok": True,
-            "status_code": 200,
-            "headers": {"content-type": "text/plain"},
-            "body": '0:[null,["$","$L1",null,{"foo":"bar"}]]',
-            "body_snippet": "0:[",
-        },
+        lambda url, **kwargs: http_response(  # noqa: ARG001
+            ok=True,
+            status_code=200,
+            body='0:[null,["$","$L1",null,{"foo":"bar"}]]',
+            headers={"content-type": "text/plain"},
+        ),
     )
     assert waku.probe_waku_rsc_surface("http://example") is True
 
@@ -325,20 +336,8 @@ def test_probe_waku_rsc_surface_requires_flight_for_text_plain(monkeypatch):
 def test_probe_waku_server_actions_extracts_endpoints(monkeypatch):
     def fake_scan(url, **kwargs):  # noqa: ARG001
         if url.endswith(".js"):
-            return {
-                "ok": True,
-                "status_code": 200,
-                "headers": {},
-                "body": '"abcdef123456#actionOne"',
-                "body_snippet": '"abcdef123456#actionOne"',
-            }
-        return {
-            "ok": True,
-            "status_code": 200,
-            "headers": {},
-            "body": "/RSC/F/123456789abc/actionTwo.txt",
-            "body_snippet": "/RSC/F/123456789abc/actionTwo.txt",
-        }
+            return http_response(status_code=200, body='"abcdef123456#actionOne"')
+        return http_response(status_code=200, body="/RSC/F/123456789abc/actionTwo.txt")
 
     monkeypatch.setattr(waku, "request_with_retries", fake_scan)
     has_actions, count, endpoints = waku.probe_waku_server_actions("http://example")
@@ -349,24 +348,12 @@ def test_probe_waku_server_actions_extracts_endpoints(monkeypatch):
 
 def test_probe_waku_server_actions_create_server_refs(monkeypatch):
     bodies = {
-        "http://example": {
-            "ok": True,
-            "status_code": 200,
-            "headers": {},
-            "body": 'createServerReference("src/app/actions#run")',
-            "body_snippet": 'createServerReference("src/app/actions#run")',
-        },
-        "http://example/src/app/actions.ts": {
-            "ok": True,
-            "status_code": 200,
-            "headers": {},
-            "body": '"123456789abc#foo"',
-            "body_snippet": '"123456789abc#foo"',
-        },
+        "http://example": http_response(status_code=200, body='createServerReference("src/app/actions#run")'),
+        "http://example/src/app/actions.ts": http_response(status_code=200, body='"123456789abc#foo"'),
     }
 
     def fake_scan(url, **kwargs):  # noqa: ARG001
-        return bodies.get(url, {"ok": False, "status_code": 404, "headers": {}, "body": "", "body_snippet": ""})
+        return bodies.get(url, http_response(ok=False, status_code=404, body=""))
 
     monkeypatch.setattr(waku, "request_with_retries", fake_scan)
     has_actions, count, endpoints = waku.probe_waku_server_actions("http://example")
@@ -378,13 +365,11 @@ def test_probe_waku_server_actions_extracts_txt_extension_and_uppercase_hash(mon
     monkeypatch.setattr(
         waku,
         "request_with_retries",
-        lambda url, **kwargs: {  # noqa: ARG001
-            "ok": True,
-            "status_code": 200,
-            "headers": {},
-            "body": "/RSC/F/ABCDEF1234567890/act$ion-Name.txt",
-            "body_snippet": "/RSC/F/ABCDEF1234567890/act$ion-Name.txt",
-        },
+        lambda url, **kwargs: http_response(  # noqa: ARG001
+            ok=True,
+            status_code=200,
+            body="/RSC/F/ABCDEF1234567890/act$ion-Name.txt",
+        ),
     )
     has_actions, count, endpoints = waku.probe_waku_server_actions("http://example")
     assert has_actions is True
@@ -397,13 +382,11 @@ def test_probe_waku_server_actions_extracts_prefetched_rsc_route_endpoints(monke
     monkeypatch.setattr(
         waku,
         "request_with_retries",
-        lambda url, **kwargs: {  # noqa: ARG001
-            "ok": True,
-            "status_code": 200,
-            "headers": {},
-            "body": "globalThis.__WAKU_PREFETCHED__ = {'/RSC/index.txt': Promise.resolve(1)};",
-            "body_snippet": "globalThis.__WAKU_PREFETCHED__ = {'/RSC/index.txt': Promise.resolve(1)};",
-        },
+        lambda url, **kwargs: http_response(  # noqa: ARG001
+            ok=True,
+            status_code=200,
+            body="globalThis.__WAKU_PREFETCHED__ = {'/RSC/index.txt': Promise.resolve(1)};",
+        ),
     )
     has_actions, count, endpoints = waku.probe_waku_server_actions("http://example")
     assert has_actions is False
@@ -415,15 +398,14 @@ def test_probe_waku_server_actions_prefetch_does_not_imply_actions(monkeypatch):
     monkeypatch.setattr(
         waku,
         "request_with_retries",
-        lambda url, **kwargs: {  # noqa: ARG001
-            "ok": True,
-            "status_code": 200,
-            "headers": {},
-            "body": "<form action=\"javascript:throw new Error('React form unexpectedly submitted.')\"></form>"
-            "globalThis.__WAKU_PREFETCHED__ = {'/RSC/index.txt': Promise.resolve(1)};",
-            "body_snippet": "<form action=\"javascript:throw new Error('React form unexpectedly submitted.')\"></form>"
-            "globalThis.__WAKU_PREFETCHED__ = {'/RSC/index.txt': Promise.resolve(1)};",
-        },
+        lambda url, **kwargs: http_response(  # noqa: ARG001
+            ok=True,
+            status_code=200,
+            body=(
+                '<form action="javascript:throw new Error(\'React form unexpectedly submitted.\')"></form>'
+                "globalThis.__WAKU_PREFETCHED__ = {'/RSC/index.txt': Promise.resolve(1)};"
+            ),
+        ),
     )
     has_actions, count, endpoints = waku.probe_waku_server_actions("http://example")
     assert has_actions is False
@@ -433,39 +415,26 @@ def test_probe_waku_server_actions_prefetch_does_not_imply_actions(monkeypatch):
 
 def test_probe_waku_server_actions_follows_imports(monkeypatch):
     bodies = {
-        "http://example": {
-            "ok": True,
-            "status_code": 200,
-            "headers": {},
-            "body": '<html><body><script type="module" src="/src/components/ActionForm.tsx"></script></body></html>',
-            "body_snippet": "",
-        },
-        "http://example/src/components/ActionForm.tsx": {
-            "ok": True,
-            "status_code": 200,
-            "headers": {"content-type": "text/javascript"},
-            "body": 'import {logFieldUpdate} from "/src/actions.ts";',
-            "body_snippet": "",
-        },
-        "http://example/src/actions.ts": {
-            "ok": True,
-            "status_code": 200,
-            "headers": {"content-type": "text/javascript"},
-            "body": 'createServerReference("/app/src/actions.ts#logFieldUpdate")',
-            "body_snippet": "",
-        },
+        "http://example": http_response(
+            status_code=200,
+            body='<html><body><script type="module" src="/src/components/ActionForm.tsx"></script></body></html>',
+        ),
+        "http://example/src/components/ActionForm.tsx": http_response(
+            status_code=200,
+            body='import {logFieldUpdate} from "/src/actions.ts";',
+            headers={"content-type": "text/javascript"},
+        ),
+        "http://example/src/actions.ts": http_response(
+            status_code=200,
+            body='createServerReference("/app/src/actions.ts#logFieldUpdate")',
+            headers={"content-type": "text/javascript"},
+        ),
     }
 
     def fake_scan(url, **kwargs):  # noqa: ARG001
         return bodies.get(
             url,
-            {
-                "ok": True,
-                "status_code": 404,
-                "headers": {"content-type": "text/plain"},
-                "body": "Not Found",
-                "body_snippet": "Not Found",
-            },
+            http_response(ok=True, status_code=404, body="Not Found", headers={"content-type": "text/plain"}),
         )
 
     monkeypatch.setattr(waku, "request_with_retries", fake_scan)
@@ -479,13 +448,11 @@ def test_probe_waku_server_actions_extracts_prefetched_route_keys(monkeypatch):
     monkeypatch.setattr(
         waku,
         "request_with_retries",
-        lambda url, **kwargs: {  # noqa: ARG001
-            "ok": True,
-            "status_code": 200,
-            "headers": {},
-            "body": 'globalThis.__WAKU_PREFETCHED__ = {"R/_root": Promise.resolve(1)};',
-            "body_snippet": 'globalThis.__WAKU_PREFETCHED__ = {"R/_root": Promise.resolve(1)};',
-        },
+        lambda url, **kwargs: http_response(  # noqa: ARG001
+            ok=True,
+            status_code=200,
+            body='globalThis.__WAKU_PREFETCHED__ = {"R/_root": Promise.resolve(1)};',
+        ),
     )
     has_actions, count, endpoints = waku.probe_waku_server_actions("http://example")
     assert has_actions is False

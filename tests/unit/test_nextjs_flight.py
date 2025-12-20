@@ -29,6 +29,11 @@ def test_infer_nextjs_rsc_signals_from_html_react19_html_escaped():
     assert infer_nextjs_rsc_signals_from_html(body) == (True, 19)
 
 
+def test_infer_nextjs_rsc_signals_from_html_does_not_use_broad_v19_hint_without_next_f():
+    body = '...0:{\\"foo\\":1}...'
+    assert infer_nextjs_rsc_signals_from_html(body) == (False, None)
+
+
 def test_infer_nextjs_rsc_signals_from_html_react18_wrapped():
     body = '...0:[null,["$", "$L1", null]]...'
     assert infer_nextjs_rsc_signals_from_html(body) == (True, 18)
@@ -43,4 +48,3 @@ def test_infer_nextjs_rsc_signals_from_html_react18_multiline_html_payload():
 def test_infer_nextjs_rsc_signals_from_html_prefers_react19_when_both_hints_present():
     body = '0:[null,["$"\n0:{"a":"$@1"}'
     assert infer_nextjs_rsc_signals_from_html(body) == (True, 19)
-

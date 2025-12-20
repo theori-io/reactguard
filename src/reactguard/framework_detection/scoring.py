@@ -3,76 +3,85 @@
 
 """Confidence scoring for framework detection."""
 
-import json
-import logging
-from pathlib import Path
 from typing import Any
 
-logger = logging.getLogger(__name__)
-
-CONFIG_PATH = Path(__file__).parent / "confidence_config.json"
-
-
-def _load_config() -> dict[str, Any] | None:
-    if not CONFIG_PATH.exists():
-        return None
-    try:
-        return json.loads(CONFIG_PATH.read_text())
-    except (json.JSONDecodeError, OSError) as exc:
-        logger.warning("Failed to load confidence config: %s", exc)
-        return None
-
-
-_config = _load_config()
+from .keys import (
+    SIG_EXPO_REGISTRY,
+    SIG_EXPO_ROUTER,
+    SIG_HEADER_POWERED_BY_NEXTJS,
+    SIG_INVOCATION_ENABLED,
+    SIG_NEXTJS_CHUNK_PATTERN,
+    SIG_NEXTJS_DATA_SCRIPT,
+    SIG_NEXTJS_HYDRATION_ARRAY,
+    SIG_NEXTJS_MANIFEST,
+    SIG_NEXTJS_STATIC_PATHS,
+    SIG_REACT_ROUTER_CONFIDENCE,
+    SIG_REACT_ROUTER_MANIFEST,
+    SIG_REACT_ROUTER_VERSION,
+    SIG_REACT_ROUTER_V5_BUNDLE,
+    SIG_REACT_ROUTER_V6_BUNDLE,
+    SIG_REACT_ROUTER_V7_BUNDLE,
+    SIG_REACT_SPA_STRUCTURE,
+    SIG_REACT_STREAMING_MARKERS,
+    SIG_RSC_CONTENT_TYPE,
+    SIG_RSC_FLIGHT_PAYLOAD,
+    SIG_VITE_ASSETS,
+    SIG_VITE_MODULEPRELOAD_ASSETS,
+    SIG_WAKU_HEADER,
+    SIG_WAKU_LEGACY_ARCHITECTURE,
+    SIG_WAKU_META_GENERATOR,
+    SIG_WAKU_MINIMAL_HTML,
+    SIG_WAKU_MODULE_CACHE,
+    SIG_WAKU_ROOT,
+    SIG_WAKU_RSC_SURFACE,
+    SIG_WAKU_VARS,
+)
 
 # Default weights derived from lab container observations; confidence_config.json
 # can override these for experimentation without code changes.
-_DEFAULT_STRONG_SIGNAL_WEIGHTS: dict[str, int] = {
+STRONG_SIGNAL_WEIGHTS: dict[str, int] = {
     # Next.js
-    "nextjs_hydration_array": 25,
-    "nextjs_data_script": 15,
-    "nextjs_static_paths": 12,
-    "nextjs_chunk_pattern": 10,
-    "nextjs_manifest": 10,
+    SIG_NEXTJS_HYDRATION_ARRAY: 25,
+    SIG_NEXTJS_DATA_SCRIPT: 15,
+    SIG_NEXTJS_STATIC_PATHS: 12,
+    SIG_NEXTJS_CHUNK_PATTERN: 10,
+    SIG_NEXTJS_MANIFEST: 10,
     # RSC
-    "rsc_content_type": 30,
-    "rsc_flight_payload": 22,
+    SIG_RSC_CONTENT_TYPE: 30,
+    SIG_RSC_FLIGHT_PAYLOAD: 22,
     # Waku
-    "waku_root": 24,
-    "waku_header": 18,
-    "waku_meta_generator": 26,
+    SIG_WAKU_ROOT: 24,
+    SIG_WAKU_HEADER: 18,
+    SIG_WAKU_META_GENERATOR: 26,
     # Some older Waku variants (0.17-0.20 in our lab) do not expose the meta generator or version header,
     # but still have stable Waku-specific globals and bootstrapping markers.
-    "waku_vars": 14,
-    "waku_module_cache": 12,
-    "waku_legacy_architecture": 20,
-    "waku_rsc_surface": 10,
+    SIG_WAKU_VARS: 14,
+    SIG_WAKU_MODULE_CACHE: 12,
+    SIG_WAKU_LEGACY_ARCHITECTURE: 20,
+    SIG_WAKU_RSC_SURFACE: 10,
     # Newer Waku builds sometimes serve an ultra-minimal HTML shell and require fetching a module script
     # to reveal Waku globals; treat that probe as a strong signal when it hits.
-    "waku_minimal_html": 18,
+    SIG_WAKU_MINIMAL_HTML: 18,
     # React Router
-    "react_router_manifest": 16,
-    "react_router_version": 14,
-    "react_router_v7_bundle": 14,
-    "react_router_v6_bundle": 12,
-    "react_router_v5_bundle": 10,
+    SIG_REACT_ROUTER_MANIFEST: 16,
+    SIG_REACT_ROUTER_VERSION: 14,
+    SIG_REACT_ROUTER_V7_BUNDLE: 14,
+    SIG_REACT_ROUTER_V6_BUNDLE: 12,
+    SIG_REACT_ROUTER_V5_BUNDLE: 10,
     # Expo
-    "expo_router": 14,
-    "expo_registry": 18,
+    SIG_EXPO_ROUTER: 14,
+    SIG_EXPO_REGISTRY: 18,
     # Attack surface
-    "invocation_enabled": 8,
+    SIG_INVOCATION_ENABLED: 8,
 }
 
-_DEFAULT_SUPPORTING_SIGNAL_WEIGHTS: dict[str, int] = {
-    "header_powered_by_nextjs": 6,
-    "vite_assets": 4,
-    "vite_modulepreload_assets": 6,
-    "react_spa_structure": 4,
-    "react_streaming_markers": 6,
+SUPPORTING_SIGNAL_WEIGHTS: dict[str, int] = {
+    SIG_HEADER_POWERED_BY_NEXTJS: 6,
+    SIG_VITE_ASSETS: 4,
+    SIG_VITE_MODULEPRELOAD_ASSETS: 6,
+    SIG_REACT_SPA_STRUCTURE: 4,
+    SIG_REACT_STREAMING_MARKERS: 6,
 }
-
-STRONG_SIGNAL_WEIGHTS = _config.get("strong_signal_weights", _DEFAULT_STRONG_SIGNAL_WEIGHTS) if _config else _DEFAULT_STRONG_SIGNAL_WEIGHTS
-SUPPORTING_SIGNAL_WEIGHTS = _config.get("supporting_signal_weights", _DEFAULT_SUPPORTING_SIGNAL_WEIGHTS) if _config else _DEFAULT_SUPPORTING_SIGNAL_WEIGHTS
 
 
 def score_confidence(signals: dict[str, Any]) -> tuple[int, str, dict[str, Any]]:
@@ -90,7 +99,7 @@ def score_confidence(signals: dict[str, Any]) -> tuple[int, str, dict[str, Any]]
             score += weight
             supporting_hits.append(signal_name)
 
-    router_confidence = str(signals.get("react_router_confidence") or "").lower()
+    router_confidence = str(signals.get(SIG_REACT_ROUTER_CONFIDENCE) or "").lower()
     router_bonus = {"high": 10, "medium": 6, "low": 3}.get(router_confidence, 0)
     score += router_bonus
 
@@ -100,7 +109,9 @@ def score_confidence(signals: dict[str, Any]) -> tuple[int, str, dict[str, Any]]
     penalties: list[str] = []
 
     has_strong = bool(strong_hits)
-    has_only_mutable = not has_strong and supporting_hits and all(sig in {"header_powered_by_nextjs", "vite_assets"} for sig in supporting_hits)
+    has_only_mutable = not has_strong and supporting_hits and all(
+        sig in {SIG_HEADER_POWERED_BY_NEXTJS, SIG_VITE_ASSETS} for sig in supporting_hits
+    )
 
     if has_only_mutable:
         penalties.append("mutable_signals_only")

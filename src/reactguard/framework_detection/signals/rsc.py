@@ -3,13 +3,15 @@
 
 """RSC endpoint and server action probing."""
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
 from ...http import request_with_retries
 from ...http.headers import normalize_headers
 from ...utils import TagSet
-from ..constants import RSC_PROBE_FLIGHT_BODY_PATTERN
+from ..base import DetectionState
+from ...rsc.heuristics import response_looks_like_flight
 from ..keys import SIG_INVOCATION_CONFIDENCE, SIG_INVOCATION_ENABLED, SIG_RSC_ENDPOINT_FOUND
 from .server_actions import probe_server_actions_support
 
@@ -66,16 +68,13 @@ def _probe_rsc_endpoint_ctx(endpoint_url: str) -> bool:
         return False
 
     resp = request_with_retries(endpoint_url)
-    if not resp.get("ok") or resp.get("status_code") != 200:
+    if not resp.ok or resp.status_code != 200:
         return False
 
-    resp_headers = normalize_headers(resp.get("headers"))
-    resp_body = (resp.get("body") or resp.get("body_snippet") or "").strip()
+    resp_headers = normalize_headers(resp.headers)
+    resp_body = (resp.text or resp.body_snippet or "").strip()
 
-    if resp_headers.get("content-type", "").startswith("text/x-component"):
-        return True
-
-    if resp_body and RSC_PROBE_FLIGHT_BODY_PATTERN.match(resp_body):
+    if response_looks_like_flight(resp_headers, resp_body):
         return True
 
     return False
@@ -97,7 +96,7 @@ def _probe_server_actions_ctx(base_url: str) -> bool:
             action_id="probe",
             payload_style="plain",
         )
-        if result_plain.get("supported"):
+        if _probe_supported(result_plain):
             return True
 
         result_multipart = probe_server_actions_support(
@@ -105,9 +104,15 @@ def _probe_server_actions_ctx(base_url: str) -> bool:
             action_id="probe",
             payload_style="multipart",
         )
-        return bool(result_multipart.get("supported"))
+        return _probe_supported(result_multipart)
     except Exception:
         return False
+
+
+def _probe_supported(result: object) -> bool:
+    if isinstance(result, Mapping):
+        return bool(result.get("supported"))
+    return bool(getattr(result, "supported", False))
 
 
 def probe_server_actions(
@@ -132,8 +137,9 @@ def probe_rsc_and_actions(
 def apply_rsc_probe_results(
     base_url: str | None,
     *,
-    tags: TagSet,
-    signals: dict[str, Any],
+    tags: TagSet | None = None,
+    signals: dict[str, Any] | None = None,
+    state: DetectionState | None = None,
     rsc_tag: str | None = None,
     server_actions_tag: str | None = None,
     server_actions_imply_rsc: bool = False,
@@ -146,6 +152,12 @@ def apply_rsc_probe_results(
     - Adds ``server_actions_tag`` when server actions are detected.
     - Optionally sets default False values when nothing is detected.
     """
+    if state is not None:
+        tags = state.tags
+        signals = state.signals
+    if tags is None or signals is None:
+        raise ValueError("tags/signals or state must be provided")
+
     applier = RscSignalApplier(
         tags=tags,
         signals=signals,

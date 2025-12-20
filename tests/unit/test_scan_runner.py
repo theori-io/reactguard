@@ -1,10 +1,9 @@
 # SPDX-FileCopyrightText: 2025 Theori Inc.
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
-from reactguard.models import FrameworkDetectionResult, ScanRequest
+from reactguard.models import FrameworkDetectionResult, ScanReport, ScanRequest
 from reactguard.models.poc import PocStatus
 from reactguard.scan.engine import ScanEngine
-from reactguard.scan.report_builder import build_scan_report
 
 
 class FakeDetectionEngine:
@@ -39,5 +38,5 @@ def test_scan_engine_passes_final_url():
 def test_build_scan_report_accepts_mapping():
     detection = FrameworkDetectionResult(tags=[], signals={})
     vuln_mapping = {"status": PocStatus.INCONCLUSIVE, "details": {"reason": "x"}}
-    report = build_scan_report(detection, vuln_mapping)
+    report = ScanReport.from_parts(detection, vuln_mapping)
     assert report.vulnerability_detection.status == PocStatus.INCONCLUSIVE

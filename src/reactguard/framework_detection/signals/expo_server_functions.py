@@ -9,9 +9,9 @@ import re
 from dataclasses import dataclass
 
 from ...http import request_with_retries
+from ...http.js import DEFAULT_MAX_JS_BYTES
 from ...http.url import build_endpoint_candidates, same_origin
-
-_FLIGHT_LINE_RE = re.compile(r"^\d+:(?:I\[|\[|\{)", re.MULTILINE)
+from ...rsc.heuristics import looks_like_flight_payload
 _BUNDLE_URL_RE = re.compile(r'"(/[^"\s]+?\.bundle\?[^"\s]+)"')
 _ACTION_REF_RE = re.compile(r"(\./[^\"']+?\.(?:ts|tsx|js|jsx|mjs|cjs)#[_$A-Za-z0-9]+)")
 
@@ -39,15 +39,15 @@ def _probe_expo_flight_ctx(base_url: str) -> tuple[bool, str | None, str]:
             },
             allow_redirects=True,
         )
-        if not resp.get("ok"):
+        if not resp.ok:
             continue
-        if (resp.get("status_code") or 0) != 200:
+        if (resp.status_code or 0) != 200:
             continue
-        final_url = str(resp.get("url") or flight_url)
+        final_url = str(resp.url or flight_url)
         if final_url and not same_origin(base_url, final_url):
             continue
-        body = str(resp.get("body") or resp.get("body_snippet") or "")
-        if _FLIGHT_LINE_RE.search(body):
+        body = str(resp.text or resp.body_snippet or "")
+        if looks_like_flight_payload(body):
             return True, final_url, body
     return False, None, ""
 
@@ -72,17 +72,21 @@ def _discover_action_refs_from_bundles(base_url: str, bundle_paths: list[str]) -
     refs: list[str] = []
     if not base_url:
         return refs
+    total_bytes = 0
     for bundle_path in bundle_paths:
         for candidate in build_endpoint_candidates(base_url, bundle_path)[:20]:
             resp = request_with_retries(candidate, allow_redirects=True)
-            if not resp.get("ok") or (resp.get("status_code") or 0) != 200:
+            if not resp.ok or (resp.status_code or 0) != 200:
                 continue
-            final_url = str(resp.get("url") or candidate)
+            final_url = str(resp.url or candidate)
             if final_url and not same_origin(base_url, final_url):
                 continue
-            body = str(resp.get("body") or resp.get("body_snippet") or "")
+            body = str(resp.text or resp.body_snippet or "")
             if not body:
                 continue
+            total_bytes += len(body)
+            if DEFAULT_MAX_JS_BYTES and total_bytes > DEFAULT_MAX_JS_BYTES:
+                return refs
             for match in _ACTION_REF_RE.finditer(body):
                 ref = match.group(1)
                 if ref and ref not in refs:

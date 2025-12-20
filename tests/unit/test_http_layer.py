@@ -136,11 +136,11 @@ def test_scan_with_retry_sets_defaults(monkeypatch):
             headers={"X-Test": "1"},
             body=b"",
         )
-    assert result["ok"] is True
-    assert result["status_code"] == 200
-    assert result["headers"]["X"] == "1"
-    assert result["body_snippet"] == "body"
-    assert result["error_message"] is None
+    assert result.ok is True
+    assert result.status_code == 200
+    assert result.headers["X"] == "1"
+    assert result.body_snippet == "body"
+    assert result.error_message is None
     assert captured["request"].headers["User-Agent"] == "UA/1.0"
     assert captured["request"].allow_redirects is True
 

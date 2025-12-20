@@ -17,9 +17,17 @@ from ..http import (
 )
 from ..http.client import HttpClient
 from ..models import FrameworkDetectionResult, ScanRequest
-from ..utils import TagSet, confidence_score, extract_versions, parse_semver
-from ..utils.context import get_scan_context, scan_context
-from .base import DetectionContext
+from ..utils import (
+    TagSet,
+    confidence_score,
+    extract_versions,
+    flatten_version_map,
+    normalize_version_map,
+    parse_semver,
+    version_map_from_signals,
+)
+from ..utils.context import get_http_settings, get_scan_context, scan_context
+from .base import DetectionContext, DetectionState
 from .keys import (
     SIG_DETECTION_CONFIDENCE,
     SIG_DETECTION_CONFIDENCE_BREAKDOWN,
@@ -27,11 +35,17 @@ from .keys import (
     SIG_DETECTOR_ERRORS,
     SIG_FETCH_ERROR_MESSAGE,
     SIG_FINAL_URL,
+    SIG_REACT_MAJOR_CONFLICT,
+    SIG_REACT_MAJOR_CONFLICT_CONFIDENCE,
+    SIG_REACT_MAJOR_CONFLICT_MAJORS,
+    SIG_REACT_MAJOR_EVIDENCE,
     SIG_REACT_BUNDLE,
     SIG_REACT_BUNDLE_ONLY,
     SIG_REACT_SERVER_DOM_BUNDLE,
     SIG_RSC_DEPENDENCY_ONLY,
     SIG_RSC_ENDPOINT_FOUND,
+    SIG_BUNDLE_VERSIONS,
+    SIG_DETECTED_VERSIONS,
     TAG_RSC,
 )
 from .registry import DETECTORS
@@ -50,8 +64,9 @@ class FrameworkDetectionEngine:
         context = get_scan_context()
         needs_http_client = context.http_client is None
         needs_extra = not isinstance(context.extra, dict)
+        needs_settings = context.http_settings is None
 
-        if needs_http_client or needs_extra:
+        if needs_http_client or needs_extra or needs_settings:
             overrides: dict[str, Any] = {}
             if needs_http_client:
                 overrides.update(
@@ -61,6 +76,8 @@ class FrameworkDetectionEngine:
                         "correlation_id": request.correlation_id,
                     }
                 )
+            if needs_settings:
+                overrides["http_settings"] = get_http_settings()
             if needs_extra:
                 overrides["extra"] = {}
             with scan_context(**overrides):
@@ -76,11 +93,12 @@ class FrameworkDetectionEngine:
         body = self._resolve_body(request, response)
         tags = TagSet()
         context = self._build_context(request, response)
+        state = DetectionState(tags=tags, signals=signals)
 
         signals.update(self._collect_version_signals(headers, body))
-        self._run_detectors(body, headers, tags, signals, context)
+        self._run_detectors(body, headers, state, context)
         self._apply_confidence(signals)
-        self._apply_rsc_flags(tags, signals)
+        self._apply_rsc_flags(state)
         self._annotate_react_major_evidence(signals)
 
         return FrameworkDetectionResult(tags=tags.to_list(), signals=signals)
@@ -138,27 +156,25 @@ class FrameworkDetectionEngine:
     def _collect_version_signals(headers: dict[str, str], body: str) -> dict[str, Any]:
         signals: dict[str, Any] = {}
         versions = extract_versions(headers, body)
-        for key, value in versions.items():
-            if value is not None:
-                signals[f"detected_{key}"] = value
+        signals[SIG_DETECTED_VERSIONS] = {key: pick.to_mapping() for key, pick in versions.items()}
+        signals.update(flatten_version_map(versions, prefix="detected_"))
         return signals
 
     def _run_detectors(
         self,
         body: str,
         headers: dict[str, str],
-        tags: TagSet,
-        signals: dict[str, Any],
+        state: DetectionState,
         context: DetectionContext,
     ) -> None:
         for detector in DETECTORS:
-            if detector.should_skip(tags):
+            if detector.should_skip(state):
                 continue
             try:
-                detector.detect(body, headers, tags, signals, context)
+                detector.detect(body, headers, state, context)
             except Exception as exc:  # noqa: BLE001
                 logger.exception("Detector %s failed: %s", detector.name, exc)
-                signals.setdefault(SIG_DETECTOR_ERRORS, []).append(detector.name)
+                state.signals.setdefault(SIG_DETECTOR_ERRORS, []).append(detector.name)
 
     @staticmethod
     def _apply_confidence(signals: dict[str, Any]) -> None:
@@ -168,14 +184,14 @@ class FrameworkDetectionEngine:
         signals[SIG_DETECTION_CONFIDENCE_BREAKDOWN] = breakdown
 
     @staticmethod
-    def _apply_rsc_flags(tags: TagSet, signals: dict[str, Any]) -> None:
-        has_react_bundle = signals.get(SIG_REACT_BUNDLE)
-        has_rsc_runtime = signals.get(SIG_REACT_SERVER_DOM_BUNDLE)
-        has_rsc_endpoint = signals.get(SIG_RSC_ENDPOINT_FOUND) or TAG_RSC in tags
+    def _apply_rsc_flags(state: DetectionState) -> None:
+        has_react_bundle = state.signals.get(SIG_REACT_BUNDLE)
+        has_rsc_runtime = state.signals.get(SIG_REACT_SERVER_DOM_BUNDLE)
+        has_rsc_endpoint = state.signals.get(SIG_RSC_ENDPOINT_FOUND) or TAG_RSC in state.tags
         if has_rsc_runtime and not has_rsc_endpoint:
-            signals[SIG_RSC_DEPENDENCY_ONLY] = True
+            state.signals[SIG_RSC_DEPENDENCY_ONLY] = True
         if has_react_bundle and not has_rsc_endpoint and not has_rsc_runtime:
-            signals[SIG_REACT_BUNDLE_ONLY] = True
+            state.signals[SIG_REACT_BUNDLE_ONLY] = True
 
     @staticmethod
     def _annotate_react_major_evidence(signals: dict[str, Any]) -> None:
@@ -187,95 +203,61 @@ class FrameworkDetectionEngine:
         """
         evidence: list[dict[str, Any]] = []
 
-        def _add_major_evidence(
-            *,
-            major_key: str,
-            source_key: str,
-            confidence_key: str,
-            default_source: str,
-        ) -> None:
-            raw = signals.get(major_key)
-            if raw is None:
-                return
-            try:
-                major = int(raw)
-            except (TypeError, ValueError):
-                return
-            evidence.append(
-                {
-                    "major": major,
-                    "signal": major_key,
-                    "source": str(signals.get(source_key) or default_source),
-                    "confidence": str(signals.get(confidence_key) or "none"),
-                }
-            )
+        detected_versions = normalize_version_map(signals.get(SIG_DETECTED_VERSIONS))
+        if not detected_versions:
+            detected_versions = version_map_from_signals(signals, prefix="detected_")
 
-        def _add_version_evidence(
-            *,
-            version_key: str,
-            source_key: str,
-            confidence_key: str,
-            default_source: str,
-        ) -> None:
-            version = signals.get(version_key)
-            if not version:
+        bundle_versions = normalize_version_map(signals.get(SIG_BUNDLE_VERSIONS))
+        if not bundle_versions:
+            bundle_versions = version_map_from_signals(signals, prefix="bundle_")
+
+        def _add_version_evidence(version_key: str, version_map: dict[str, Any], *, default_source: str) -> None:
+            pick = version_map.get(version_key)
+            if not pick:
                 return
-            parsed = parse_semver(str(version))
+            parsed = parse_semver(str(pick.value))
             if not parsed:
                 return
             evidence.append(
                 {
                     "major": parsed.major,
                     "signal": version_key,
-                    "version": str(version),
-                    "source": str(signals.get(source_key) or default_source),
-                    "confidence": str(signals.get(confidence_key) or "none"),
+                    "version": str(pick.value),
+                    "source": str(pick.source or default_source),
+                    "confidence": str(pick.confidence or "none"),
+                }
+            )
+
+        def _add_major_evidence(major_key: str, version_map: dict[str, Any], *, default_source: str) -> None:
+            pick = version_map.get(major_key)
+            if not pick:
+                return
+            try:
+                major = int(pick.value)
+            except (TypeError, ValueError):
+                return
+            evidence.append(
+                {
+                    "major": major,
+                    "signal": major_key,
+                    "source": str(pick.source or default_source),
+                    "confidence": str(pick.confidence or "none"),
                 }
             )
 
         # Order: prefer runtime version markers, then explicit React version, then major-only heuristics.
-        _add_version_evidence(
-            version_key="detected_rsc_runtime_version",
-            source_key="detected_rsc_runtime_version_source",
-            confidence_key="detected_rsc_runtime_version_confidence",
-            default_source="detected_rsc_runtime_version",
-        )
-        _add_version_evidence(
-            version_key="detected_react_version",
-            source_key="detected_react_version_source",
-            confidence_key="detected_react_version_confidence",
-            default_source="detected_react_version",
-        )
-        _add_major_evidence(
-            major_key="detected_react_major",
-            source_key="detected_react_major_source",
-            confidence_key="detected_react_major_confidence",
-            default_source="detected_react_major",
-        )
+        _add_version_evidence("rsc_runtime_version", detected_versions, default_source="detected_rsc_runtime_version")
+        _add_version_evidence("react_version", detected_versions, default_source="detected_react_version")
+        _add_major_evidence("react_major", detected_versions, default_source="detected_react_major")
 
-        _add_version_evidence(
-            version_key="bundle_rsc_runtime_version",
-            source_key="bundle_rsc_runtime_version_source",
-            confidence_key="bundle_rsc_runtime_version_confidence",
-            default_source="bundle_rsc_runtime_version",
-        )
-        _add_version_evidence(
-            version_key="bundle_react_version",
-            source_key="bundle_react_version_source",
-            confidence_key="bundle_react_version_confidence",
-            default_source="bundle_react_version",
-        )
-        _add_major_evidence(
-            major_key="bundle_react_major",
-            source_key="bundle_react_major_source",
-            confidence_key="bundle_react_major_confidence",
-            default_source="bundle_react_major",
-        )
+        _add_version_evidence("rsc_runtime_version", bundle_versions, default_source="bundle_rsc_runtime_version")
+        _add_version_evidence("react_version", bundle_versions, default_source="bundle_react_version")
+        _add_major_evidence("react_major", bundle_versions, default_source="bundle_react_major")
 
         if not evidence:
             return
 
-        signals["react_major_evidence"] = evidence
+        signals[SIG_REACT_MAJOR_EVIDENCE] = evidence
 
         strong_majors = {
             item["major"]
@@ -283,13 +265,13 @@ class FrameworkDetectionEngine:
             if confidence_score(str(item.get("confidence") or "none")) >= confidence_score("medium")
         }
         if len(strong_majors) > 1:
-            signals["react_major_conflict"] = True
-            signals["react_major_conflict_confidence"] = "high"
-            signals["react_major_conflict_majors"] = sorted(strong_majors)
+            signals[SIG_REACT_MAJOR_CONFLICT] = True
+            signals[SIG_REACT_MAJOR_CONFLICT_CONFIDENCE] = "high"
+            signals[SIG_REACT_MAJOR_CONFLICT_MAJORS] = sorted(strong_majors)
             return
 
         all_majors = {item["major"] for item in evidence}
-        signals["react_major_conflict"] = len(all_majors) > 1
-        signals["react_major_conflict_confidence"] = "low" if signals["react_major_conflict"] else "none"
-        if signals["react_major_conflict"]:
-            signals["react_major_conflict_majors"] = sorted(all_majors)
+        signals[SIG_REACT_MAJOR_CONFLICT] = len(all_majors) > 1
+        signals[SIG_REACT_MAJOR_CONFLICT_CONFIDENCE] = "low" if signals[SIG_REACT_MAJOR_CONFLICT] else "none"
+        if signals[SIG_REACT_MAJOR_CONFLICT]:
+            signals[SIG_REACT_MAJOR_CONFLICT_MAJORS] = sorted(all_majors)

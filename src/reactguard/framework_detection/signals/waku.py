@@ -9,11 +9,10 @@ from typing import Any
 from urllib.parse import urlparse
 
 from ...http import request_with_retries
-from ...http.headers import header_value
 from ...http.js import crawl_same_origin_js_modules
 from ...http.url import build_endpoint_candidates, same_origin
+from ...rsc.heuristics import response_looks_like_flight
 from ..constants import (
-    SERVER_ACTIONS_FLIGHT_PATTERN,
     WAKU_ACTION_ID_PATTERN_V021,
     WAKU_ACTION_ID_PATTERN_V025,
     WAKU_ACTION_LITERAL_PATTERN,
@@ -125,9 +124,9 @@ def _probe_waku_rsc_surface_ctx(base_url: str | None) -> bool:
         endpoint_paths: list[str] = ["/RSC/_", "/RSC/index.txt", "/RSC/index.rsc"]
         try:
             base_scan = request_with_retries(base_url, allow_redirects=True)
-            if base_scan.get("ok") and (base_scan.get("status_code") or 0) == 200:
-                effective_base_url = str(base_scan.get("url") or base_url)
-                base_body = base_scan.get("body") or base_scan.get("body_snippet", "")
+            if base_scan.ok and (base_scan.status_code or 0) == 200:
+                effective_base_url = str(base_scan.url or base_url)
+                base_body = base_scan.text or base_scan.body_snippet or ""
                 for match in WAKU_RSC_PREFETCH_KEY_PATTERN.finditer(base_body):
                     endpoint = match.group(1)
                     if endpoint and endpoint not in endpoint_paths:
@@ -149,28 +148,23 @@ def _probe_waku_rsc_surface_ctx(base_url: str | None) -> bool:
                     probe_url,
                     allow_redirects=True,
                 )
-                if not resp.get("ok"):
+                if not resp.ok:
                     continue
 
-                final_url = str(resp.get("url") or probe_url)
+                final_url = str(resp.url or probe_url)
                 if final_url and not same_origin(effective_base_url, final_url):
                     continue
 
-                status = resp.get("status_code", 0) or 0
+                status = resp.status_code or 0
                 if status != 200:
                     continue
 
-                body = resp.get("body") or resp.get("body_snippet", "")
-                content_type = header_value(resp.get("headers") or {}, "content-type")
-
-                # Waku Flight responses may start with module rows like `1:I[...]` before the main `0:{...}` row,
-                # so detect any Flight-like row on any line.
-                looks_flight = bool(re.search(r"^\d+:(?:I\[|\[|\{)", body, re.MULTILINE)) or bool(SERVER_ACTIONS_FLIGHT_PATTERN.search(body))
-                content_type_lower = content_type.lower()
-                is_rsc_ct = "text/x-component" in content_type_lower
+                body = resp.text or resp.body_snippet or ""
+                # Waku Flight responses may start with module rows like `1:I[...]` before the main `0:{...}` row.
+                looks_flight = response_looks_like_flight(resp.headers, body)
                 # Note: Waku may respond with Flight in text/plain, but text/plain alone is too common
                 # on non-Waku sites (e.g., 404 bodies), so don't treat it as a positive signal by itself.
-                if looks_flight or is_rsc_ct:
+                if looks_flight:
                     return True
 
         return False
@@ -208,13 +202,13 @@ def _probe_waku_minimal_html_ctx(body: str, base_url: str | None) -> bool:
         js_path = match.group(1)
         for js_url in _candidate_same_origin_urls(base_url, js_path)[:20]:
             scan = request_with_retries(js_url, allow_redirects=True)
-            if not scan.get("ok") or scan.get("status_code") != 200:
+            if not scan.ok or scan.status_code != 200:
                 continue
-            final_url = str(scan.get("url") or js_url)
+            final_url = str(scan.url or js_url)
             if final_url and not same_origin(base_url, final_url):
                 continue
 
-            js_body = scan.get("body") or scan.get("body_snippet", "")
+            js_body = scan.text or scan.body_snippet or ""
             return "__WAKU_" in js_body or "__waku" in js_body.lower()
 
         return False
@@ -235,20 +229,20 @@ def _probe_waku_server_actions_ctx(
             base_url,
             allow_redirects=True,
         )
-        if not scan.get("ok"):
+        if not scan.ok:
             return (
                 False,
                 0,
                 [],
                 {
-                    "error_message": scan.get("error_message"),
-                    "error_type": scan.get("error_type"),
-                    "status_code": scan.get("status_code"),
+                    "error_message": scan.error_message,
+                    "error_type": scan.error_type,
+                    "status_code": scan.status_code,
                 },
             )
 
-        effective_base_url = str(scan.get("url") or base_url)
-        body = scan.get("body") or scan.get("body_snippet", "")
+        effective_base_url = str(scan.url or base_url)
+        body = scan.text or scan.body_snippet or ""
         action_endpoints: list[tuple[str, str]] = []
         prefetch_endpoints: list[tuple[str, str]] = []
 

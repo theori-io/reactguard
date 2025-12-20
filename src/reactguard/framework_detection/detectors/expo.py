@@ -5,8 +5,7 @@
 
 from typing import Any
 
-from ...utils import TagSet
-from ..base import DetectionContext, FrameworkDetector
+from ..base import DetectionContext, DetectionState, FrameworkDetector
 from ..constants import (
     EXPO_REGISTRY_PATTERN,
     EXPO_RESET_STYLE_PATTERN,
@@ -18,6 +17,13 @@ from ..keys import (
     SIG_INVOCATION_CONFIDENCE,
     SIG_INVOCATION_ENABLED,
     SIG_INVOCATION_ENDPOINTS,
+    SIG_EXPO_FLIGHT_SURFACE,
+    SIG_EXPO_REGISTRY,
+    SIG_EXPO_RESET_STYLE,
+    SIG_EXPO_ROUTER,
+    SIG_EXPO_ROUTER_PACKAGE,
+    SIG_EXPO_RSC_EVIDENCE,
+    SIG_EXPO_STATIC_ASSETS,
     SIG_REACT_BUNDLE,
     SIG_REACT_DOM_BUNDLE,
     SIG_REACT_SERVER_DOM_BUNDLE,
@@ -40,10 +46,11 @@ class ExpoDetector(FrameworkDetector):
         self,
         body: str,
         headers: dict[str, str],
-        tags: TagSet,
-        signals: dict[str, Any],
+        state: DetectionState,
         context: DetectionContext,
     ) -> None:
+        tags = state.tags
+        signals = state.signals
         has_registry = bool(EXPO_REGISTRY_PATTERN.search(body))
         has_hydrate = bool(EXPO_ROUTER_HYDRATE_PATTERN.search(body))
         has_router_pkg = bool(EXPO_ROUTER_PATTERN.search(body))
@@ -51,15 +58,15 @@ class ExpoDetector(FrameworkDetector):
         has_reset_style = bool(EXPO_RESET_STYLE_PATTERN.search(body))
 
         if has_registry:
-            signals["expo_registry"] = True
+            signals[SIG_EXPO_REGISTRY] = True
         if has_hydrate:
-            signals["expo_router"] = True
+            signals[SIG_EXPO_ROUTER] = True
         if has_router_pkg:
-            signals["expo_router_package"] = True
+            signals[SIG_EXPO_ROUTER_PACKAGE] = True
         if has_static_assets:
-            signals["expo_static_assets"] = True
+            signals[SIG_EXPO_STATIC_ASSETS] = True
         if has_reset_style:
-            signals["expo_reset_style"] = True
+            signals[SIG_EXPO_RESET_STYLE] = True
 
         bundle_signals: dict[str, Any] = {}
         if context.url:
@@ -67,9 +74,9 @@ class ExpoDetector(FrameworkDetector):
                 context.url,
                 body,
             )
-            if bundle_signals.get("expo_router"):
-                signals["expo_router"] = True
-            if bundle_signals.get("react_bundle"):
+            if bundle_signals.get(SIG_EXPO_ROUTER):
+                signals[SIG_EXPO_ROUTER] = True
+            if bundle_signals.get(SIG_REACT_BUNDLE):
                 signals[SIG_REACT_BUNDLE] = True
             if bundle_signals.get(SIG_REACT_DOM_BUNDLE):
                 signals[SIG_REACT_DOM_BUNDLE] = True
@@ -82,7 +89,7 @@ class ExpoDetector(FrameworkDetector):
                 keys=("react_version", "react_major", "rsc_runtime_version"),
             )
 
-        bundle_hit = bundle_signals.get("expo_router")
+        bundle_hit = bundle_signals.get(SIG_EXPO_ROUTER)
         is_expo = bool(has_registry or has_hydrate or bundle_hit or has_router_pkg or has_static_assets or has_reset_style)
 
         if is_expo:
@@ -94,7 +101,7 @@ class ExpoDetector(FrameworkDetector):
                     tags.add(TAG_EXPO_RSC)
                     tags.add(TAG_RSC)
                     signals[SIG_RSC_ENDPOINT_FOUND] = True
-                    signals["expo_flight_surface"] = True
+                    signals[SIG_EXPO_FLIGHT_SURFACE] = True
 
                 if probe.invocation_endpoints:
                     tags.add(TAG_EXPO_SERVER_ACTIONS)
@@ -107,7 +114,7 @@ class ExpoDetector(FrameworkDetector):
                     signals.setdefault(SIG_INVOCATION_ENABLED, None)
                     signals.setdefault(SIG_INVOCATION_CONFIDENCE, "none")
                 if probe.evidence:
-                    signals["expo_rsc_evidence"] = dict(probe.evidence)
+                    signals[SIG_EXPO_RSC_EVIDENCE] = dict(probe.evidence)
 
-    def should_skip(self, tags: TagSet) -> bool:
-        return TAG_EXPO in tags
+    def should_skip(self, state: DetectionState) -> bool:
+        return TAG_EXPO in state.tags

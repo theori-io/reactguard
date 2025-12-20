@@ -3,21 +3,20 @@
 
 """Version parsing and extraction utilities."""
 
-import logging
+from __future__ import annotations
+
 import re
 from dataclasses import dataclass
 from functools import lru_cache
-from typing import Any
+from typing import Any, Mapping
 
-from .confidence import confidence_label, confidence_score
+from .confidence import confidence_score
 from .version_thresholds import (
     NEXT_CANARY_SAFE_BUILD,
     NEXT_PATCHED_PATCH_BY_MINOR,
     REACT_FIXED_VERSIONS,
     REACT_VULNERABLE_VERSIONS,
 )
-
-logger = logging.getLogger(__name__)
 
 
 @lru_cache(maxsize=64)
@@ -65,6 +64,34 @@ class ParsedVersion:
         return (self.major, self.minor, self.patch, self.suffix)
 
 
+@dataclass(frozen=True)
+class DetectedVersion:
+    """Normalized version pick with source/confidence metadata."""
+
+    value: str | int
+    source: str | None = None
+    confidence: str | None = None
+
+    def to_mapping(self) -> dict[str, Any]:
+        return {
+            "value": self.value,
+            "source": self.source,
+            "confidence": self.confidence,
+        }
+
+    @classmethod
+    def from_mapping(cls, data: Mapping[str, Any] | None) -> "DetectedVersion" | None:
+        if not isinstance(data, Mapping):
+            return None
+        if "value" not in data:
+            return None
+        return cls(
+            value=data.get("value"),
+            source=data.get("source"),
+            confidence=data.get("confidence"),
+        )
+
+
 def parse_semver(version: str | None) -> ParsedVersion | None:
     if not version:
         return None
@@ -77,6 +104,172 @@ def parse_semver(version: str | None) -> ParsedVersion | None:
         patch=int(match.group(3) or 0),
         suffix=match.group(4) or "",
     )
+
+
+def normalize_version_map(raw: Mapping[str, Any] | None) -> dict[str, DetectedVersion]:
+    """Coerce a mapping of version picks into DetectedVersion objects."""
+    if not isinstance(raw, Mapping):
+        return {}
+    normalized: dict[str, DetectedVersion] = {}
+    for key, value in raw.items():
+        if not isinstance(key, str):
+            continue
+        if isinstance(value, DetectedVersion):
+            normalized[key] = value
+            continue
+        if isinstance(value, Mapping):
+            detected = DetectedVersion.from_mapping(value)
+            if detected is not None:
+                normalized[key] = detected
+    return normalized
+
+
+def flatten_version_map(versions: Mapping[str, DetectedVersion], *, prefix: str = "") -> dict[str, Any]:
+    """Flatten a DetectedVersion map into legacy signal keys."""
+    flat: dict[str, Any] = {}
+    for key, detected in versions.items():
+        flat[f"{prefix}{key}"] = detected.value
+        if detected.source is not None:
+            flat[f"{prefix}{key}_source"] = detected.source
+        if detected.confidence is not None:
+            flat[f"{prefix}{key}_confidence"] = detected.confidence
+    return flat
+
+
+def version_map_from_signals(signals: Mapping[str, Any] | None, *, prefix: str) -> dict[str, DetectedVersion]:
+    """Build a DetectedVersion map from flattened legacy signal keys."""
+    if not isinstance(signals, Mapping):
+        return {}
+    versions: dict[str, DetectedVersion] = {}
+    for key, value in signals.items():
+        if not isinstance(key, str) or not key.startswith(prefix):
+            continue
+        suffix = key[len(prefix) :]
+        if suffix.endswith("_confidence") or suffix.endswith("_source"):
+            continue
+        if value is None:
+            continue
+        source = signals.get(f"{prefix}{suffix}_source")
+        confidence = signals.get(f"{prefix}{suffix}_confidence")
+        versions[suffix] = DetectedVersion(value=value, source=source, confidence=confidence)
+    return versions
+
+
+def version_values(versions: Mapping[str, DetectedVersion]) -> dict[str, Any]:
+    """Return a simplified map of version values (dropping metadata)."""
+    return {key: detected.value for key, detected in versions.items()}
+
+
+def merge_version_maps(
+    target: dict[str, DetectedVersion],
+    source: Mapping[str, DetectedVersion],
+    *,
+    prefer_semver: bool = True,
+) -> None:
+    """Merge version picks into target, preferring stronger confidence."""
+    for key, detected in source.items():
+        update_version_pick(
+            target,
+            key,
+            detected.value,
+            source=detected.source,
+            confidence=detected.confidence,
+            prefer_semver=prefer_semver,
+        )
+
+
+def derive_react_major(versions: dict[str, DetectedVersion]) -> None:
+    """Derive React major from the best available version pick."""
+    major_source_key = None
+    major_source = None
+    major_confidence = None
+
+    rsc_pick = versions.get("rsc_runtime_version")
+    react_pick = versions.get("react_version")
+
+    if rsc_pick:
+        major_source_key = "rsc_runtime_version"
+        major_source = rsc_pick.source
+        major_confidence = rsc_pick.confidence
+        parsed = parse_semver(str(rsc_pick.value))
+    elif react_pick:
+        major_source_key = "react_version"
+        major_source = react_pick.source
+        major_confidence = react_pick.confidence
+        parsed = parse_semver(str(react_pick.value))
+    else:
+        parsed = None
+
+    if not parsed:
+        return
+
+    source = f"derived:{major_source_key}" if major_source_key else "derived"
+    if major_source:
+        source = f"derived:{major_source}"
+    update_version_pick(
+        versions,
+        "react_major",
+        parsed.major,
+        source=source,
+        confidence=major_confidence or "medium",
+        prefer_semver=False,
+    )
+
+
+def _semver_rank(value: object) -> tuple[int, int, int, int, str]:
+    """
+    Rank a semver-ish string for tie-breaking (when confidence scores are equal).
+
+    Prefer stable releases over canary/rc markers to reduce false positives from unrelated bundles.
+    """
+    parsed = parse_semver(str(value)) if value is not None else None
+    if not parsed:
+        return (0, 0, 0, 0, "")
+
+    suffix = str(parsed.suffix or "").lower()
+    if not suffix:
+        suffix_rank = 3
+    elif "canary" in suffix:
+        suffix_rank = 2
+    elif "rc" in suffix:
+        suffix_rank = 0
+    else:
+        suffix_rank = 1
+
+    return (suffix_rank, parsed.major, parsed.minor, parsed.patch, suffix)
+
+
+def _prefer_semver(existing: object, candidate: object) -> bool:
+    """Return True if candidate should replace existing for equal-confidence version picks."""
+    return _semver_rank(candidate) > _semver_rank(existing)
+
+
+def update_version_pick(
+    versions: dict[str, DetectedVersion],
+    key: str,
+    value: object,
+    *,
+    source: str | None,
+    confidence: str | None,
+    prefer_semver: bool = True,
+) -> None:
+    """Update a version pick in-place when the candidate is stronger."""
+    if value is None:
+        return
+    current = versions.get(key)
+    current_confidence = confidence_score(current.confidence if current else None)
+    new_confidence = confidence_score(confidence)
+
+    should_set = False
+    if current is None:
+        should_set = True
+    elif new_confidence > current_confidence:
+        should_set = True
+    elif new_confidence == current_confidence and prefer_semver:
+        should_set = _prefer_semver(current.value, value)
+
+    if should_set:
+        versions[key] = DetectedVersion(value=value, source=source, confidence=confidence)
 
 
 def compare_semver(a: str | None, b: str | None) -> int | None:
@@ -92,16 +285,6 @@ def compare_semver(a: str | None, b: str | None) -> int | None:
 
 
 SEMVER_PATTERN = r"\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?"
-
-
-def _confidence_score(confidence: str | None) -> int:
-    """Backwards-compatible alias for confidence scoring."""
-    return confidence_score(confidence)
-
-
-def _confidence_label(score: int) -> str:
-    """Backwards-compatible alias for mapping scores to labels."""
-    return confidence_label(score)
 
 
 class VersionPatterns:
@@ -149,8 +332,13 @@ class VersionPatterns:
     REACT_VERSION_CONST = re.compile(rf"\bReactVersion\s*=\s*\\?['\"]({SEMVER_PATTERN})\\?['\"]")
 
 
-def extract_versions(headers: dict[str, str], body: str, *, case_sensitive_body: bool = False) -> dict[str, Any]:
-    versions: dict[str, Any] = {}
+def extract_versions(
+    headers: dict[str, str],
+    body: str,
+    *,
+    case_sensitive_body: bool = False,
+) -> dict[str, DetectedVersion]:
+    versions: dict[str, DetectedVersion] = {}
     # Be defensive: some callers may pass non-normalized header dicts.
     headers = {str(k).lower(): str(v) for k, v in (headers or {}).items() if k is not None}
     body = body or ""
@@ -166,19 +354,14 @@ def extract_versions(headers: dict[str, str], body: str, *, case_sensitive_body:
 
     def _maybe_set_version(key: str, value: str, source: str, confidence: str) -> None:
         """Set a version value with source/confidence, preferring stronger confidence."""
-        current_confidence = confidence_score(versions.get(f"{key}_confidence"))
-        new_confidence = confidence_score(confidence)
-        if key not in versions or new_confidence > current_confidence:
-            versions[key] = value
-            versions[f"{key}_source"] = source
-            versions[f"{key}_confidence"] = confidence
-
-    def _confidence_from_source(source: str) -> str:
-        if source in {"header", "rsc_flight", "rsc_runtime_package", "core_package"}:
-            return "high"
-        if source in {"manifest", "literal"}:
-            return "medium"
-        return "low"
+        update_version_pick(
+            versions,
+            key,
+            value,
+            source=source,
+            confidence=confidence,
+            prefer_semver=True,
+        )
 
     next_ver = headers.get("x-nextjs-version") or headers.get("x-next-version")
     if next_ver:
@@ -193,7 +376,6 @@ def extract_versions(headers: dict[str, str], body: str, *, case_sensitive_body:
         value = rsc_flight_match.group(1)
         _maybe_set_version("rsc_runtime_version", value, "rsc_flight", "high")
         _maybe_set_version("react_version", value, "rsc_flight", "high")
-        versions["rsc_flight_version_source"] = "I_chunk"
 
     rsc_runtime = _search(VersionPatterns.RSC_RUNTIME_PACKAGE, body)
     if rsc_runtime:
@@ -206,12 +388,14 @@ def extract_versions(headers: dict[str, str], body: str, *, case_sensitive_body:
             _maybe_set_version("react_version", core_react_match.group(1), "core_package", "high")
 
     if "react_version" not in versions and versions.get("rsc_runtime_version"):
-        _maybe_set_version(
-            "react_version",
-            versions["rsc_runtime_version"],
-            "rsc_runtime_package",
-            versions.get("rsc_runtime_version_confidence", "high"),
-        )
+        rsc_pick = versions.get("rsc_runtime_version")
+        if rsc_pick:
+            _maybe_set_version(
+                "react_version",
+                rsc_pick.value,
+                "rsc_runtime_package",
+                rsc_pick.confidence or "high",
+            )
 
     if "react_version" not in versions:
         react_match = _search(VersionPatterns.REACT_PACKAGE, body)
@@ -308,16 +492,7 @@ def extract_versions(headers: dict[str, str], body: str, *, case_sensitive_body:
     if rr_match:
         _maybe_set_version("react_router_version", rr_match.group(1), "bundle_literal", "high")
 
-    if versions.get("react_version"):
-        react_ver = str(versions["react_version"])
-        if react_ver and react_ver[0].isdigit():
-            try:
-                versions["react_major"] = int(react_ver.split(".")[0])
-                versions["react_major_confidence"] = versions.get("react_version_confidence", "medium")
-                if versions.get("react_version_source"):
-                    versions["react_major_source"] = f"derived:{versions.get('react_version_source')}"
-            except ValueError:
-                logger.debug("Could not parse React major from: %s", react_ver)
+    derive_react_major(versions)
 
     return versions
 
@@ -430,3 +605,4 @@ def waku_version_implies_react_major(waku_version: str | None) -> int | None:
     if parsed.major == 0 and parsed.minor >= 19:
         return 19
     return None
+

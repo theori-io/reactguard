@@ -1,8 +1,39 @@
 # SPDX-FileCopyrightText: 2025 Theori Inc.
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
+from reactguard.rsc.types import RscResponse
 from reactguard.utils.context import scan_context
 from reactguard.vulnerability_detection.assessors import ReactServerComponentsDec2025Assessor, RscDec2025Spec
+from reactguard.vulnerability_detection.snapshots import DetectContext
+
+
+def make_detect_context(*, invocation_endpoints=None, invocation_enabled=None, invocation_confidence=None):
+    return DetectContext(
+        react_major=None,
+        react_major_confidence=None,
+        react_major_conflict=None,
+        react_major_conflict_confidence=None,
+        react_major_conflict_majors=None,
+        invocation_enabled=invocation_enabled,
+        invocation_confidence=invocation_confidence,
+        signals={},
+        tags=[],
+        invocation_endpoints=invocation_endpoints or [],
+        detected_versions={},
+        extra={},
+    )
+
+
+def rsc_response(*, status_code=200, body="", headers=None, ok=True):
+    text = str(body or "")
+    return RscResponse(
+        ok=ok,
+        status_code=status_code,
+        headers=headers or {},
+        text=text,
+        content=text.encode(),
+        url=None,
+    )
 
 
 def test_dec2025_fingerprint_cache_is_scoped_to_scan_context(monkeypatch):
@@ -18,24 +49,28 @@ def test_dec2025_fingerprint_cache_is_scoped_to_scan_context(monkeypatch):
 
     def _control_stub(_endpoint: str, **_kwargs):
         calls["control"] += 1
-        return {"status_code": 200, "headers": {"content-type": "text/plain"}, "body": "ok"}
+        return rsc_response(status_code=200, body="ok", headers={"content-type": "text/plain"})
 
     def _conn_stub(_endpoint: str, **_kwargs):
         calls["conn"] += 1
-        return {"status_code": 500, "headers": {"content-type": "text/plain"}, "body": "Connection closed."}
+        return rsc_response(status_code=500, body="Connection closed.", headers={"content-type": "text/plain"})
 
     def _marker_stub(_endpoint: str, *, server_ref_marker: str, **_kwargs):
         calls["marker"] += 1
         if server_ref_marker == "h":
-            return {"status_code": 500, "headers": {"content-type": "text/plain"}, "body": "Connection closed."}
-        return {"status_code": 500, "headers": {"content-type": "text/plain"}, "body": "Args shape error"}
+            return rsc_response(status_code=500, body="Connection closed.", headers={"content-type": "text/plain"})
+        return rsc_response(status_code=500, body="Args shape error", headers={"content-type": "text/plain"})
 
-    monkeypatch.setattr("reactguard.vulnerability_detection.assessors.rsc_dec2025.send_dec2025_safe_control_probe", _control_stub)
-    monkeypatch.setattr("reactguard.vulnerability_detection.assessors.rsc_dec2025.send_dec2025_missing_chunk_probe", _conn_stub)
-    monkeypatch.setattr("reactguard.vulnerability_detection.assessors.rsc_dec2025.send_dec2025_server_reference_marker_root_probe", _marker_stub)
+    monkeypatch.setattr("reactguard.vulnerability_detection.assessors.rsc_dec2025_probes.send_dec2025_safe_control_probe", _control_stub)
+    monkeypatch.setattr("reactguard.vulnerability_detection.assessors.rsc_dec2025_probes.send_dec2025_missing_chunk_probe", _conn_stub)
+    monkeypatch.setattr("reactguard.vulnerability_detection.assessors.rsc_dec2025_probes.send_dec2025_server_reference_marker_root_probe", _marker_stub)
 
     base_url = "http://example"
-    detect_context = {"invocation_endpoints": [base_url], "invocation_enabled": True, "invocation_confidence": "high"}
+    detect_context = make_detect_context(
+        invocation_endpoints=[base_url],
+        invocation_enabled=True,
+        invocation_confidence="high",
+    )
 
     assessor = ReactServerComponentsDec2025Assessor(RscDec2025Spec(cve_id="CVE-2025-55184", title="t"))
 
@@ -50,4 +85,3 @@ def test_dec2025_fingerprint_cache_is_scoped_to_scan_context(monkeypatch):
         assert calls["control"] > first["control"], "fingerprint should not be reused across independent scan contexts"
         assert calls["conn"] > first["conn"]
         assert calls["marker"] > first["marker"]
-

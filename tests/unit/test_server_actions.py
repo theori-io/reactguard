@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
 from reactguard.framework_detection.signals import server_actions
+from reactguard.http.models import HttpResponse
 from reactguard.utils.tag_manager import TagSet
 
 
@@ -9,7 +10,7 @@ def test_detect_server_actions_handles_404(monkeypatch):
     monkeypatch.setattr(
         server_actions,
         "send_rsc_request",
-        lambda *_, **__: {"ok": True, "status_code": 404, "headers": {}, "body": "not found", "body_snippet": "not found"},
+        lambda *_, **__: HttpResponse(ok=True, status_code=404, headers={}, text="not found"),
     )
     result = server_actions.detect_server_actions("http://example")
     assert result["supported"] is False
@@ -21,13 +22,7 @@ def test_detect_server_actions_html_and_rsc_paths(monkeypatch):
     monkeypatch.setattr(
         server_actions,
         "send_rsc_request",
-        lambda *_, **__: {
-            "ok": True,
-            "status_code": 200,
-            "headers": {"content-type": "text/html"},
-            "body": "<html>__next_data__</html>",
-            "body_snippet": "<html>__next_data__</html>",
-        },
+        lambda *_, **__: HttpResponse(ok=True, status_code=200, headers={"content-type": "text/html"}, text="<html>__next_data__</html>"),
     )
     html_result = server_actions.detect_server_actions("http://example")
     assert html_result["supported"] is True
@@ -36,13 +31,12 @@ def test_detect_server_actions_html_and_rsc_paths(monkeypatch):
     monkeypatch.setattr(
         server_actions,
         "send_rsc_request",
-        lambda *_, **__: {
-            "ok": True,
-            "status_code": 500,
-            "headers": {"content-type": server_actions.SERVER_ACTIONS_RSC_CONTENT_TYPE},
-            "body": '0:{"a":"$@"}',
-            "body_snippet": '0:{"a":"$@"}',
-        },
+        lambda *_, **__: HttpResponse(
+            ok=True,
+            status_code=500,
+            headers={"content-type": server_actions.SERVER_ACTIONS_RSC_CONTENT_TYPE},
+            text='0:{"a":"$@"}',
+        ),
     )
     rsc_result = server_actions.detect_server_actions("http://example")
     assert rsc_result["supported"] is True
@@ -53,7 +47,7 @@ def test_detect_server_actions_redirect(monkeypatch):
     monkeypatch.setattr(
         server_actions,
         "send_rsc_request",
-        lambda *_, **__: {"ok": True, "status_code": 302, "headers": {}, "body": "", "body_snippet": ""},
+        lambda *_, **__: HttpResponse(ok=True, status_code=302, headers={}, text=""),
     )
     result = server_actions.detect_server_actions("http://example")
     assert result["supported"] is False

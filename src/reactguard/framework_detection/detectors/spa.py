@@ -5,8 +5,7 @@
 
 from typing import Any
 
-from ...utils import TagSet
-from ..base import DetectionContext, FrameworkDetector
+from ..base import DetectionContext, DetectionState, FrameworkDetector
 from ..constants import (
     FRAMEWORK_HTML_MARKERS,
     SPA_MODULEPRELOAD_PATTERN,
@@ -18,6 +17,12 @@ from ..keys import (
     SIG_REACT_BUNDLE,
     SIG_REACT_DOM_BUNDLE,
     SIG_REACT_SERVER_DOM_BUNDLE,
+    SIG_REACT_SPA_MOUNT,
+    SIG_REACT_SPA_MODULES,
+    SIG_REACT_SPA_STRUCTURE,
+    SIG_REACT_SSR_VITE,
+    SIG_VITE_ASSETS,
+    SIG_VITE_MODULEPRELOAD_ASSETS,
     TAG_EXPO,
     TAG_NEXTJS,
     TAG_REACT_ROUTER_V7,
@@ -37,10 +42,11 @@ class SPADetector(FrameworkDetector):
         self,
         body: str,
         headers: dict[str, str],
-        tags: TagSet,
-        signals: dict[str, Any],
+        state: DetectionState,
         context: DetectionContext,
     ) -> None:
+        tags = state.tags
+        signals = state.signals
         body_lower = body.lower()
         has_data_reactroot = "data-reactroot" in body_lower
         framework_tags = {TAG_NEXTJS, TAG_WAKU, TAG_EXPO}
@@ -56,25 +62,25 @@ class SPADetector(FrameworkDetector):
         has_mount = bool(SPA_MOUNT_POINT_PATTERN.search(body))
         if has_mount:
             spa_signals += 1
-            signals["react_spa_mount"] = True
+            signals[SIG_REACT_SPA_MOUNT] = True
 
         if SPA_SCRIPT_MODULE_PATTERN.search(body):
             spa_signals += 1
-            signals["react_spa_modules"] = True
+            signals[SIG_REACT_SPA_MODULES] = True
 
         if SPA_VITE_ASSETS_PATTERN.search(body):
             spa_signals += 1
-            signals["vite_assets"] = True
+            signals[SIG_VITE_ASSETS] = True
 
         if SPA_MODULEPRELOAD_PATTERN.search(body):
-            signals["vite_modulepreload_assets"] = True
+            signals[SIG_VITE_MODULEPRELOAD_ASSETS] = True
 
         if context.url and spa_signals >= 1:
             bundle_signals = probe_js_bundles(
                 context.url,
                 body,
             )
-            if bundle_signals.get("react_bundle"):
+            if bundle_signals.get(SIG_REACT_BUNDLE):
                 spa_signals += 1
                 signals[SIG_REACT_BUNDLE] = True
             if bundle_signals.get(SIG_REACT_DOM_BUNDLE):
@@ -84,12 +90,12 @@ class SPADetector(FrameworkDetector):
 
         if spa_signals >= 2 and has_mount and (has_data_reactroot or signals.get(SIG_REACT_BUNDLE)):
             tags.add(TAG_REACT_SPA)
-            signals["react_spa_structure"] = True
-        elif signals.get("vite_modulepreload_assets"):
-            if (signals.get(SIG_REACT_BUNDLE) or signals.get("react_spa_modules")) and (has_data_reactroot or signals.get(SIG_REACT_BUNDLE)):
+            signals[SIG_REACT_SPA_STRUCTURE] = True
+        elif signals.get(SIG_VITE_MODULEPRELOAD_ASSETS):
+            if (signals.get(SIG_REACT_BUNDLE) or signals.get(SIG_REACT_SPA_MODULES)) and (has_data_reactroot or signals.get(SIG_REACT_BUNDLE)):
                 tags.add(TAG_REACT_SSR_VITE)
-                signals["react_ssr_vite"] = True
+                signals[SIG_REACT_SSR_VITE] = True
 
-    def should_skip(self, tags: TagSet) -> bool:
+    def should_skip(self, state: DetectionState) -> bool:
         framework_tags = {TAG_NEXTJS, TAG_WAKU, TAG_EXPO, TAG_REACT_ROUTER_V7}
-        return any(tag in tags for tag in framework_tags)
+        return any(tag in state.tags for tag in framework_tags)

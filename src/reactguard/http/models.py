@@ -45,6 +45,29 @@ class HttpResponse:
         """Return a trimmed text body for lightweight analysis."""
         return self.text or ""
 
+    def to_mapping(self) -> dict[str, Any]:
+        """Return a dictionary representation for legacy call sites."""
+        return {
+            "ok": self.ok,
+            "status_code": self.status_code,
+            "headers": dict(self.headers or {}),
+            "body": self.text,
+            "body_snippet": self.body_snippet,
+            "url": self.url,
+            "error_message": self.error_message,
+            "error_type": self.error_type,
+            "meta": dict(self.meta or {}),
+        }
+
+    def get(self, key: str, default: Any = None) -> Any:
+        """Dict-like access for transitional call sites."""
+        return self.to_mapping().get(key, default)
+
+    def __getitem__(self, key: str) -> Any:
+        if key in {"ok", "status_code", "headers", "body", "body_snippet", "url", "error_message", "error_type", "meta"}:
+            return self.to_mapping()[key]
+        raise KeyError(key)
+
     @classmethod
     def from_mapping(cls, data: Mapping[str, Any]) -> HttpResponse:
         """Helper to normalize dictionary-like responses (e.g., worker scan output)."""
@@ -79,9 +102,14 @@ class HttpResponse:
             text = raw_snippet
             content = raw_snippet.encode("utf-8")
 
+        status_code = data.get("status_code")
+        ok_value = data.get("ok")
+        if ok_value is None:
+            ok_value = status_code is not None
+
         return cls(
-            ok=bool(data.get("ok")),
-            status_code=data.get("status_code"),
+            ok=bool(ok_value),
+            status_code=status_code,
             headers=headers,
             text=text,
             content=content,

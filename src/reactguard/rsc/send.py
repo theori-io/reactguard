@@ -6,7 +6,8 @@
 from __future__ import annotations
 
 from ..http import request_with_retries
-from .types import RscHttpResult, RscPayload, RscRequestConfig
+from ..http.models import HttpResponse
+from .types import RscPayload, RscRequestConfig, RscResponse
 
 
 def send_rsc_request(
@@ -15,7 +16,7 @@ def send_rsc_request(
     payload: RscPayload,
     *,
     action_id: str | None = None,
-) -> RscHttpResult:
+) -> RscResponse:
     """
     Send an RSC probe request using the shared HTTP stack.
 
@@ -30,7 +31,7 @@ def send_rsc_request(
         headers[config.action_id_header] = action_id
 
     try:
-        raw = request_with_retries(
+        response = request_with_retries(
             url,
             method=config.method,
             headers=headers,
@@ -40,25 +41,31 @@ def send_rsc_request(
     except Exception as exc:  # noqa: BLE001
         if isinstance(exc, (KeyboardInterrupt, SystemExit)):
             raise
-        raw = {
-            "ok": False,
-            "status_code": None,
-            "headers": {},
-            "body": "",
-            "body_snippet": "",
-            "url": url,
-            "error_message": str(exc),
-            "error_type": exc.__class__.__name__,
-            "error": str(exc),
-        }
+        response = HttpResponse(
+            ok=False,
+            status_code=None,
+            headers={},
+            text="",
+            url=url,
+            error_message=str(exc),
+            error_type=exc.__class__.__name__,
+        )
 
-    result: RscHttpResult = raw  # type: ignore[assignment]
-    result.setdefault("endpoint", url)
-    if action_id is not None:
-        result.setdefault("action_id", action_id)
-    result.setdefault("request_wire_format", str(payload.wire_format.value))
-    result.setdefault("payload_meta", payload.meta)
-    return result
+    return RscResponse(
+        ok=response.ok,
+        status_code=response.status_code,
+        headers=dict(response.headers or {}),
+        text=response.text or "",
+        content=response.content or b"",
+        url=response.url or url,
+        error_message=response.error_message,
+        error_type=response.error_type,
+        meta=dict(response.meta or {}),
+        endpoint=url,
+        action_id=action_id,
+        request_wire_format=str(payload.wire_format.value),
+        payload_meta=dict(payload.meta or {}),
+    )
 
 
 __all__ = ["send_rsc_request"]

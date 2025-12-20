@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from contextlib import suppress
 
+from .config import load_http_settings
 from .framework_detection.engine import FrameworkDetectionEngine
 from .http.client import HttpClient, create_default_http_client
 from .models import (
@@ -29,7 +30,8 @@ class ReactGuard:
     """
 
     def __init__(self, http_client: HttpClient | None = None):
-        self.http_client = http_client or create_default_http_client()
+        self.http_settings = load_http_settings()
+        self.http_client = http_client or create_default_http_client(self.http_settings)
         self.detection_engine = FrameworkDetectionEngine(self.http_client)
         self.vulnerability_engine = VulnerabilityDetectionEngine(self.detection_engine)
         self.scan_engine = ScanEngine(self.detection_engine, self.vulnerability_engine)
@@ -55,7 +57,12 @@ class ReactGuard:
             proxy_profile=proxy_profile,
             correlation_id=correlation_id,
         )
-        with scan_context(http_client=self.http_client, proxy_profile=proxy_profile, correlation_id=correlation_id):
+        with scan_context(
+            http_client=self.http_client,
+            http_settings=self.http_settings,
+            proxy_profile=proxy_profile,
+            correlation_id=correlation_id,
+        ):
             return self.detection_engine.detect(request)
 
     def scan_vulnerabilities(
@@ -66,7 +73,12 @@ class ReactGuard:
         proxy_profile: str | None = None,
         correlation_id: str | None = None,
     ) -> list[VulnerabilityReport]:
-        with scan_context(http_client=self.http_client, proxy_profile=proxy_profile, correlation_id=correlation_id):
+        with scan_context(
+            http_client=self.http_client,
+            http_settings=self.http_settings,
+            proxy_profile=proxy_profile,
+            correlation_id=correlation_id,
+        ):
             result = self.vulnerability_engine.run(
                 url,
                 detection_result=detection_result,
@@ -87,7 +99,12 @@ class ReactGuard:
         correlation_id: str | None = None,
     ) -> ScanReport:
         request = ScanRequest(url=url, proxy_profile=proxy_profile, correlation_id=correlation_id)
-        with scan_context(http_client=self.http_client, proxy_profile=proxy_profile, correlation_id=correlation_id):
+        with scan_context(
+            http_client=self.http_client,
+            http_settings=self.http_settings,
+            proxy_profile=proxy_profile,
+            correlation_id=correlation_id,
+        ):
             return self.scan_engine.run(request)
 
     def close(self) -> None:

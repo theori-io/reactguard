@@ -5,6 +5,14 @@
 
 import re
 
+from ..rsc.heuristics import (
+    ACTION_NOT_FOUND_PHRASES,
+    ERROR_DIGEST_PATTERN,
+    FLIGHT_HINT_RE,
+    FLIGHT_LINE_RE,
+    RSC_CONTENT_TYPE,
+)
+
 # Common markers seen in HTML pages rendered by supported frameworks.
 FRAMEWORK_HTML_MARKERS = [
     "__next_f",
@@ -24,20 +32,6 @@ NEXTJS_NEXT_F_PATTERN = re.compile(r"self\.__next_f|__next_f\.push|__next_f=")
 NEXTJS_STATIC_PATH_PATTERN = re.compile(r"/_next/static/")
 NEXTJS_CHUNK_PATTERN = re.compile(r"/_next/static/chunks/[a-zA-Z0-9_-]+(-[a-f0-9]+)?\.js")
 NEXTJS_MANIFEST_PATTERN = re.compile(r"_buildManifest\.js")
-# React 19+ Flight payloads encode the root segment (`0:`) as an object.
-# NOTE: Avoid using overly-generic markers like `0:{` for *HTML* detection; prefer escaped/structured
-# patterns (e.g. `0:{\\\"`) and/or framework-specific hydration markers to reduce false positives.
-NEXTJS_RSC_FLIGHT_PATTERN_V19_HTML_ESCAPED = '0:{\\"'
-NEXTJS_RSC_FLIGHT_PATTERN_V19_OBJECT = '0:{"a":"$@'
-NEXTJS_RSC_FLIGHT_PATTERN_V19_OBJECT_ESCAPED = '0:{\\"a\\":\\"$@'
-# React 18 Flight payloads sometimes wrap the array root segment, e.g.:
-#   0:[null,["$","$L1",...]]
-NEXTJS_RSC_FLIGHT_PATTERN_V18_WRAPPED = '0:[null,["$"'
-NEXTJS_RSC_FLIGHT_PATTERN_V18_WRAPPED_ESCAPED = '0:[null,[\\"$"'
-NEXTJS_RSC_FLIGHT_PATTERN_V18_HTML = re.compile(r'^\s*0:\["\$","\$L', re.MULTILINE)
-NEXTJS_RSC_FLIGHT_PATTERN_V18_HTML_ESCAPED = re.compile(r'^\s*0:\[\\"\\$\\",\\"\$L', re.MULTILINE)
-NEXTJS_RSC_FLIGHT_PATTERN_V18_SIMPLE = re.compile(r'^\s*0:"\$L', re.MULTILINE)
-NEXTJS_RSC_FLIGHT_PATTERN_V18_SIMPLE_ESCAPED = re.compile(r'^\s*0:\\"\\$L', re.MULTILINE)
 
 # Expo detection markers.
 EXPO_REGISTRY_PATTERN = re.compile(r"__ExpoImportMetaRegistry")
@@ -85,7 +79,7 @@ RR_VERSION_PATTERN = re.compile(r'__reactRouterVersion"?\s*[:=]\s*"(\d+\.\d+\.\d
 REMIX_CONTEXT_PATTERN = re.compile(r"__remixContext|__remixManifest")
 
 # Generic RSC detection markers.
-GENERIC_FLIGHT_PAYLOAD_PATTERN = re.compile(r'^\d+:(?:\["\$|\{\s*"a"\s*:\s*"\$|\{\s*"id"\s*:\s*"\$)', re.MULTILINE)
+GENERIC_FLIGHT_PAYLOAD_PATTERN = FLIGHT_HINT_RE
 GENERIC_FRAGMENT_PATTERN = re.compile(r"^\$[A-Z]", re.MULTILINE)
 
 # SPA detection markers.
@@ -95,15 +89,12 @@ SPA_VITE_ASSETS_PATTERN = re.compile(r"/assets/[a-zA-Z0-9_-]+[.-][a-f0-9]+\.js")
 SPA_MODULEPRELOAD_PATTERN = re.compile(r'rel=["\']modulepreload["\']\s+href=["\']/assets/[^\s"\']+\.js')
 
 # RSC probe markers.
-RSC_PROBE_FLIGHT_BODY_PATTERN = re.compile(
-    r'^0:(?:\["\$|\[null,\["\$|\{|I\["react-server-dom-)',
-    re.IGNORECASE,
-)
+RSC_PROBE_FLIGHT_BODY_PATTERN = FLIGHT_HINT_RE
 
 # Server action probe markers.
-SERVER_ACTIONS_RSC_CONTENT_TYPE = "text/x-component"
-SERVER_ACTIONS_RSC_FLIGHT_PATTERN = re.compile(r'^\d+:[{\["\']')
-SERVER_ACTIONS_RSC_ERROR_PATTERN = re.compile(r'"digest"\s*:\s*"[0-9a-fA-F-]+"')
+SERVER_ACTIONS_RSC_CONTENT_TYPE = RSC_CONTENT_TYPE
+SERVER_ACTIONS_RSC_FLIGHT_PATTERN = FLIGHT_LINE_RE
+SERVER_ACTIONS_RSC_ERROR_PATTERN = ERROR_DIGEST_PATTERN
 SERVER_ACTIONS_HTML_PATTERN = re.compile(r"<!doctype|<html", re.IGNORECASE)
 SERVER_ACTIONS_STRONG_ACTION_KEYWORDS = [
     "next-action",
@@ -113,12 +104,11 @@ SERVER_ACTIONS_STRONG_ACTION_KEYWORDS = [
     "decode reply",
     "decodereply",
 ]
-SERVER_ACTIONS_GENERIC_ACTION_KEYWORDS = [
-    "action not found",
-    "invalid action",
-    "action error",
-    "action id",
-]
+_GENERIC_ACTION_KEYWORDS = list(ACTION_NOT_FOUND_PHRASES)
+for extra in ("action error", "action id"):
+    if extra not in _GENERIC_ACTION_KEYWORDS:
+        _GENERIC_ACTION_KEYWORDS.append(extra)
+SERVER_ACTIONS_GENERIC_ACTION_KEYWORDS = _GENERIC_ACTION_KEYWORDS
 SERVER_ACTIONS_ACTION_KEYWORDS = SERVER_ACTIONS_STRONG_ACTION_KEYWORDS + SERVER_ACTIONS_GENERIC_ACTION_KEYWORDS
-SERVER_ACTIONS_FLIGHT_PATTERN = re.compile(r"^\d+:[{\[]")
+SERVER_ACTIONS_FLIGHT_PATTERN = FLIGHT_LINE_RE
 SERVER_ACTIONS_DEFAULT_ACTION_HEADER = "Next-Action"

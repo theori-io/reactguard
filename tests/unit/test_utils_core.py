@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
 from reactguard.utils import actions, tag_manager, version
+from reactguard.utils.confidence import confidence_label, confidence_score
 
 
 def test_tagset_operations():
@@ -76,13 +77,13 @@ def test_extract_versions_prefers_high_confidence_sources():
     Waku 0.19.0
     """
     versions = version.extract_versions(headers, body)
-    assert versions["react_version"] == "19.2.0"
-    assert versions["react_version_source"] == "rsc_flight"
-    assert versions["next_version"] == "15.5.0"
-    assert versions["waku_version"] == "0.20.1"
-    assert versions["react_router_version"] == "7.0.1"
-    assert versions["react_major"] == 19
-    assert versions["react_major_confidence"] == versions["react_version_confidence"]
+    assert versions["react_version"].value == "19.2.0"
+    assert versions["react_version"].source == "rsc_flight"
+    assert versions["next_version"].value == "15.5.0"
+    assert versions["waku_version"].value == "0.20.1"
+    assert versions["react_router_version"].value == "7.0.1"
+    assert versions["react_major"].value == 19
+    assert versions["react_major"].confidence == versions["react_version"].confidence
 
 
 def test_parsed_version_comparisons_and_labels():
@@ -90,9 +91,9 @@ def test_parsed_version_comparisons_and_labels():
     b = version.ParsedVersion(1, 2, 4, "alpha")
     assert a < b
     assert str(b) == "1.2.4-alpha"
-    assert version._confidence_label(version._confidence_score("high")) == "high"
-    assert version._confidence_label(0) == "none"
-    assert version._confidence_label(1) == "low"
+    assert confidence_label(confidence_score("high")) == "high"
+    assert confidence_label(0) == "none"
+    assert confidence_label(1) == "low"
 
 
 def test_extract_versions_manifest_and_plain_paths():
@@ -103,12 +104,12 @@ def test_extract_versions_manifest_and_plain_paths():
     Waku 0.19.0
     """
     versions = version.extract_versions({}, body)
-    assert versions["react_version_source"] in {"manifest", "plain_text"}
-    assert versions["next_version_source"] in {"manifest", "plain_text"}
-    assert versions["waku_version_source"] == "plain_text"
+    assert versions["react_version"].source in {"manifest", "plain_text"}
+    assert versions["next_version"].source in {"manifest", "plain_text"}
+    assert versions["waku_version"].source == "plain_text"
 
     versions_literal = version.extract_versions({}, "react-server-dom-webpack@19.0.2 react@19.0.3 next@15.10.0")
-    assert versions_literal["react_version"] in {"19.0.2", "19.0.3"}
+    assert versions_literal["react_version"].value in {"19.0.2", "19.0.3"}
 
 
 def test_extract_versions_reactversion_constant():
@@ -119,6 +120,6 @@ def test_extract_versions_reactversion_constant():
     exports.version = ReactVersion;
     """
     versions = version.extract_versions({}, body, case_sensitive_body=True)
-    assert versions["react_version"] == "18.3.0-canary-8c8ee9ee6-20231026"
-    assert versions["react_version_source"] == "react_version_const"
-    assert versions["react_major"] == 18
+    assert versions["react_version"].value == "18.3.0-canary-8c8ee9ee6-20231026"
+    assert versions["react_version"].source == "react_version_const"
+    assert versions["react_major"].value == 18

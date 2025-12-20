@@ -7,7 +7,6 @@ from ..framework_detection.engine import FrameworkDetectionEngine
 from ..framework_detection.keys import SIG_FINAL_URL
 from ..models import FrameworkDetectionResult, ScanReport, ScanRequest
 from ..vulnerability_detection.engine import VulnerabilityDetectionEngine
-from .report_builder import build_scan_report
 
 
 class ScanEngine:
@@ -32,4 +31,4 @@ class ScanEngine:
             correlation_id=request.correlation_id,
         )
 
-        return build_scan_report(detection_result, vulnerability_result)
+        return ScanReport.from_parts(detection_result, vulnerability_result)

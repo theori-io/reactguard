@@ -9,8 +9,9 @@ import json
 import secrets
 from collections.abc import Iterable
 from dataclasses import dataclass
+from typing import Any
 
-from .types import RscPayload, RscWireFormat
+from .types import PayloadFactory, RscPayload, RscWireFormat
 
 
 def _json_dumps(value: object) -> str:
@@ -236,6 +237,275 @@ def build_random_safe_prop(*, prefix: str = "z") -> str:
     return f"{prefix}{secrets.token_hex(4)}"
 
 
+def _with_payload_meta(payload: RscPayload, meta: dict[str, Any] | None) -> RscPayload:
+    if not meta:
+        return payload
+    payload_meta = dict(payload.meta or {})
+    payload_meta.update(meta)
+    return RscPayload(
+        wire_format=payload.wire_format,
+        headers=dict(payload.headers or {}),
+        body=payload.body,
+        meta=payload_meta,
+    )
+
+
+def build_decode_payload_factories(
+    *,
+    marker: str = "F",
+    proto_prop: str = "__proto__",
+    safe_prop_prefix: str = "z",
+    root: str = "x",
+    slot: int = 1,
+    proto_meta: dict[str, Any] | None = None,
+    control_meta: dict[str, Any] | None = None,
+) -> tuple[PayloadFactory, PayloadFactory]:
+    """
+    Return proto/control payload factories for a basic decodeReply probe.
+
+    Used by Next.js/Generic/Expo-style probes where the action ID does not affect the payload.
+    """
+
+    def _proto_payload(_action_id: str) -> RscPayload:
+        payload = build_multipart_decode_payload(RscReference(slot=slot, root=root, prop=proto_prop, marker=marker))
+        return _with_payload_meta(payload, proto_meta)
+
+    def _control_payload(_action_id: str) -> RscPayload:
+        safe_prop = build_random_safe_prop(prefix=safe_prop_prefix)
+        payload = build_multipart_decode_payload(RscReference(slot=slot, root=root, prop=safe_prop, marker=marker))
+        return _with_payload_meta(payload, control_meta)
+
+    return _proto_payload, _control_payload
+
+
+def build_nextjs_action_payload_factories(
+    *,
+    server_ref_marker: str = "F",
+    proto_prop: str = "__proto__",
+    safe_prop_prefix: str = "z",
+    proto_meta: dict[str, Any] | None = None,
+    control_meta: dict[str, Any] | None = None,
+) -> tuple[PayloadFactory, PayloadFactory]:
+    """
+    Return proto/control payload factories using Next.js action payload shape.
+    """
+    if server_ref_marker not in {"F", "h"}:
+        raise ValueError("server_ref_marker must be 'F' or 'h'")
+
+    def _proto_payload(_action_id: str) -> RscPayload:
+        payload = build_nextjs_action_multipart_payload(
+            target_prop=proto_prop,
+            server_ref_marker=server_ref_marker,
+        )
+        return _with_payload_meta(payload, proto_meta)
+
+    def _control_payload(_action_id: str) -> RscPayload:
+        safe_prop = build_random_safe_prop(prefix=safe_prop_prefix)
+        payload = build_nextjs_action_multipart_payload(
+            target_prop=safe_prop,
+            server_ref_marker=server_ref_marker,
+        )
+        return _with_payload_meta(payload, control_meta)
+
+    return _proto_payload, _control_payload
+
+
+def build_safe_args_payload_factories(
+    *,
+    wire_action_id: str,
+    probe_targets: dict[str, str],
+    safe_prop_prefix: str = "z",
+    root: str = "x",
+    slot: int = 2,
+    proto_meta: dict[str, Any] | None = None,
+    control_meta: dict[str, Any] | None = None,
+) -> tuple[PayloadFactory, PayloadFactory]:
+    """
+    Return proto/control payload factories for safe-args multipart probes (React Router style).
+    """
+    wire_action_id = str(wire_action_id or "")
+
+    def _payload(action_id: str, target_prop: str, *, meta: dict[str, Any] | None) -> RscPayload:
+        ref = RscReference(slot=slot, root=root, prop=target_prop, marker="").render()
+        args_obj = build_no_invoke_args_container(["$K1", ref])
+        payload = build_multipart_form_payload(
+            [
+                (f"1_$ACTION_ID_{wire_action_id}", ""),
+                (str(slot), _json_dumps({root: {}})),
+                ("0", _json_dumps(args_obj)),
+            ],
+            meta=meta,
+        )
+        return payload
+
+    def _proto_payload(action_id: str) -> RscPayload:
+        target_prop = probe_targets.get(action_id, "__proto__")
+        meta = {"probe_kind": "proto", "probe_strategy": SAFE_ARGS_STRATEGY, "wire_action_id": wire_action_id, "probe_id": action_id, "target_prop": target_prop}
+        if proto_meta:
+            meta.update(proto_meta)
+        return _payload(action_id, target_prop, meta=meta)
+
+    def _control_payload(action_id: str) -> RscPayload:
+        safe_prop = build_random_safe_prop(prefix=safe_prop_prefix)
+        meta = {"probe_kind": "control", "probe_strategy": SAFE_ARGS_STRATEGY, "wire_action_id": wire_action_id, "probe_id": action_id}
+        if control_meta:
+            meta.update(control_meta)
+        return _payload(action_id, safe_prop, meta=meta)
+
+    return _proto_payload, _control_payload
+
+
+def build_no_invoke_temp_ref_payload(
+    *,
+    meta: dict[str, Any] | None = None,
+) -> RscPayload:
+    """Payload that triggers temp ref decoding without invoking actions."""
+    payload = build_multipart_form_payload(
+        [("0", _json_dumps([NO_INVOKE_TEMP_REF_TOKEN]))],
+        meta={"probe_strategy": NO_INVOKE_TEMP_REF_STRATEGY},
+    )
+    return _with_payload_meta(payload, meta)
+
+
+def build_dec2025_safe_control_payload(
+    *,
+    prefix_parts: list[tuple[str, str]] | None = None,
+    meta: dict[str, Any] | None = None,
+) -> RscPayload:
+    payload_parts = [("0", _json_dumps([NO_INVOKE_TEMP_REF_TOKEN]))]
+    parts = list(prefix_parts or [])
+    parts.extend(payload_parts)
+    payload = build_multipart_form_payload(
+        parts,
+        meta={"probe_kind": "dec2025_control_safe", "probe_strategy": NO_INVOKE_TEMP_REF_STRATEGY},
+    )
+    return _with_payload_meta(payload, meta)
+
+
+def build_dec2025_missing_chunk_payload(
+    *,
+    missing_chunk_id_hex: str = "ffff",
+    prefix_parts: list[tuple[str, str]] | None = None,
+    meta: dict[str, Any] | None = None,
+) -> RscPayload:
+    missing = (missing_chunk_id_hex or "").lower().strip()
+    if not missing or any(ch not in "0123456789abcdef" for ch in missing):
+        raise ValueError("missing_chunk_id_hex must be a hex string")
+    payload_parts = [("0", f'"$@{missing}"')]
+    parts = list(prefix_parts or [])
+    parts.extend(payload_parts)
+    payload = build_multipart_form_payload(
+        parts,
+        meta={"probe_kind": "dec2025_missing_chunk", "missing_chunk": missing, "probe_strategy": "missing_chunk_root_thenable"},
+    )
+    return _with_payload_meta(payload, meta)
+
+
+def build_dec2025_marker_root_payload(
+    *,
+    server_ref_marker: str,
+    prefix_parts: list[tuple[str, str]] | None = None,
+    meta: dict[str, Any] | None = None,
+) -> RscPayload:
+    if server_ref_marker not in {"F", "h"}:
+        raise ValueError("server_ref_marker must be 'F' or 'h'")
+    payload_parts = [
+        ("1", _json_dumps({"id": None})),
+        ("0", _json_dumps({"x": f"${server_ref_marker}1"})),
+    ]
+    parts = list(prefix_parts or [])
+    parts.extend(payload_parts)
+    payload = build_multipart_form_payload(
+        parts,
+        meta={"probe_kind": "dec2025_marker_root", "server_ref_marker": server_ref_marker, "probe_strategy": "marker_root_decode_error"},
+    )
+    return _with_payload_meta(payload, meta)
+
+
+def build_dec2025_nextjs_promise_chain_payload(
+    *,
+    chain_depth: int,
+    start_promise_id: int = 10,
+    missing_chunk_id_hex: str = "ffff",
+    prefix_parts: list[tuple[str, str]] | None = None,
+    meta: dict[str, Any] | None = None,
+) -> RscPayload:
+    if chain_depth < 1:
+        raise ValueError("chain_depth must be >= 1")
+
+    missing = (missing_chunk_id_hex or "").lower().strip()
+    if not missing or any(ch not in "0123456789abcdef" for ch in missing):
+        raise ValueError("missing_chunk_id_hex must be a hex string")
+
+    promise_count = chain_depth + 1
+    promise_ids = [start_promise_id + idx for idx in range(promise_count)]
+    first_promise_id = promise_ids[0]
+    last_promise_id = promise_ids[-1]
+    wrapper_chunk_id = last_promise_id + 1
+
+    parts: list[tuple[str, str]] = list(prefix_parts or [])
+
+    parts.append((str(last_promise_id), f'"$@{missing}"'))
+    for index in range(len(promise_ids) - 2, -1, -1):
+        promise_id = promise_ids[index]
+        next_id = promise_ids[index + 1]
+        parts.append((str(promise_id), f'"$@{next_id:x}"'))
+
+    wrapper_items: list[str] = [f"$@{first_promise_id:x}"]
+    wrapper_items.extend([f"${pid:x}" for pid in promise_ids])
+    parts.append((str(wrapper_chunk_id), _json_dumps(wrapper_items)))
+
+    parts.append(("0", f'"${wrapper_chunk_id:x}:0"'))
+
+    payload = build_multipart_form_payload(
+        parts,
+        meta={
+            "probe_kind": "dec2025_chain_root",
+            "chain_depth": chain_depth,
+            "missing_chunk": missing,
+            "probe_strategy": "missing_chunk_chain_terminal",
+        },
+    )
+    return _with_payload_meta(payload, meta)
+
+
+def build_dec2025_promise_chain_payload(
+    *,
+    chain_depth: int,
+    prefix_parts: list[tuple[str, str]] | None = None,
+    meta: dict[str, Any] | None = None,
+) -> RscPayload:
+    if chain_depth < 1:
+        raise ValueError("chain_depth must be >= 1")
+
+    promise_count = chain_depth + 1
+    init_chunk_id = promise_count + 1
+    root_object_id = promise_count + 2
+
+    parts: list[tuple[str, str]] = list(prefix_parts or [])
+
+    terminal = build_no_invoke_args_container([], length_token=SAFE_ARGS_LENGTH_TOKEN)
+    parts.append((str(promise_count), _json_dumps(terminal)))
+    for promise_id in range(promise_count - 1, 0, -1):
+        next_hex = f"{(promise_id + 1):x}"
+        parts.append((str(promise_id), f'"$@{next_hex}"'))
+
+    init_list = [f"${pid:x}" for pid in range(promise_count, 0, -1)]
+    parts.append((str(init_chunk_id), _json_dumps(init_list)))
+    parts.append((str(root_object_id), f'{{"a":"$@1","b":"${init_chunk_id:x}"}}'))
+    parts.append(("0", f'"${root_object_id:x}:a"'))
+
+    payload = build_multipart_form_payload(
+        parts,
+        meta={
+            "probe_kind": "dec2025_chain",
+            "chain_depth": chain_depth,
+            "probe_strategy": SAFE_ARGS_STRATEGY,
+        },
+    )
+    return _with_payload_meta(payload, meta)
+
+
 __all__ = [
     "SAFE_ARGS_LENGTH_TOKEN",
     "SAFE_ARGS_STRATEGY",
@@ -251,4 +521,13 @@ __all__ = [
     "build_plaintext_decode_payload",
     "build_plaintext_payload",
     "build_random_safe_prop",
+    "build_decode_payload_factories",
+    "build_nextjs_action_payload_factories",
+    "build_safe_args_payload_factories",
+    "build_no_invoke_temp_ref_payload",
+    "build_dec2025_safe_control_payload",
+    "build_dec2025_missing_chunk_payload",
+    "build_dec2025_marker_root_payload",
+    "build_dec2025_nextjs_promise_chain_payload",
+    "build_dec2025_promise_chain_payload",
 ]

@@ -5,8 +5,9 @@
 
 from typing import Any
 
-from ...utils import TagSet
-from ..base import DetectionContext, FrameworkDetector
+from ...utils import flatten_version_map, normalize_version_map
+from ...utils.version import update_version_pick
+from ..base import DetectionContext, DetectionState, FrameworkDetector
 from ..constants import (
     REMIX_CONTEXT_PATTERN,
     RR_CONTEXT_PATTERN,
@@ -18,6 +19,18 @@ from ..keys import (
     SIG_INVOCATION_ENABLED,
     SIG_INVOCATION_ENDPOINTS,
     SIG_RSC_ENDPOINT_FOUND,
+    SIG_REACT_ROUTER_CONFIDENCE,
+    SIG_REACT_ROUTER_MANIFEST,
+    SIG_REACT_ROUTER_SERVER_ACTION_IDS,
+    SIG_REACT_ROUTER_VERSION,
+    SIG_REACT_ROUTER_V5,
+    SIG_REACT_ROUTER_V6,
+    SIG_REACT_ROUTER_V7,
+    SIG_REMIX_HERITAGE,
+    SIG_DETECTED_VERSIONS,
+    SIG_REACT_ROUTER_V5_BUNDLE,
+    SIG_REACT_ROUTER_V6_BUNDLE,
+    SIG_REACT_ROUTER_V7_BUNDLE,
     TAG_REACT_ROUTER_V5,
     TAG_REACT_ROUTER_V6,
     TAG_REACT_ROUTER_V7,
@@ -43,10 +56,11 @@ class ReactRouterDetector(FrameworkDetector):
         self,
         body: str,
         headers: dict[str, str],
-        tags: TagSet,
-        signals: dict[str, Any],
+        state: DetectionState,
         context: DetectionContext,
     ) -> None:
+        tags = state.tags
+        signals = state.signals
         detected_version = None
         confidence = "low"
 
@@ -55,20 +69,30 @@ class ReactRouterDetector(FrameworkDetector):
         has_remix_heritage = bool(REMIX_CONTEXT_PATTERN.search(body))
 
         if has_v7_manifest or has_v7_context:
-            signals["react_router_manifest"] = True
+            signals[SIG_REACT_ROUTER_MANIFEST] = True
             detected_version = "v7"
             confidence = "high"
 
         if has_remix_heritage:
-            signals["remix_heritage"] = True
+            signals[SIG_REMIX_HERITAGE] = True
             detected_version = "v7"
             confidence = "high"
 
         version_match = RR_VERSION_PATTERN.search(body)
         if version_match:
             version_str = version_match.group(1)
-            signals["react_router_version"] = True
-            signals["detected_react_router_version"] = version_str
+            signals[SIG_REACT_ROUTER_VERSION] = True
+            detected_versions = normalize_version_map(signals.get(SIG_DETECTED_VERSIONS))
+            update_version_pick(
+                detected_versions,
+                "react_router_version",
+                version_str,
+                source="html_literal",
+                confidence="high",
+                prefer_semver=True,
+            )
+            signals[SIG_DETECTED_VERSIONS] = {key: pick.to_mapping() for key, pick in detected_versions.items()}
+            signals.update(flatten_version_map(detected_versions, prefix="detected_"))
 
             try:
                 major = int(version_str.split(".")[0])
@@ -84,8 +108,14 @@ class ReactRouterDetector(FrameworkDetector):
             except (ValueError, IndexError):
                 pass
 
+        detected_versions = normalize_version_map(signals.get(SIG_DETECTED_VERSIONS))
         needs_bundle_versions = bool(
-            context.url and (signals.get("detected_react_version") is None or signals.get("detected_react_major") is None or signals.get("detected_react_router_version") is None)
+            context.url
+            and (
+                detected_versions.get("react_version") is None
+                or detected_versions.get("react_major") is None
+                or detected_versions.get("react_router_version") is None
+            )
         )
 
         if context.url and (confidence != "high" or needs_bundle_versions):
@@ -102,13 +132,13 @@ class ReactRouterDetector(FrameworkDetector):
             )
 
             if confidence != "high":
-                if bundle_signals.get("react_router_v7_bundle"):
+                if bundle_signals.get(SIG_REACT_ROUTER_V7_BUNDLE):
                     detected_version = "v7"
                     confidence = "medium"
-                elif bundle_signals.get("react_router_v6_bundle"):
+                elif bundle_signals.get(SIG_REACT_ROUTER_V6_BUNDLE):
                     detected_version = "v6"
                     confidence = "medium"
-                elif bundle_signals.get("react_router_v5_bundle"):
+                elif bundle_signals.get(SIG_REACT_ROUTER_V5_BUNDLE):
                     detected_version = "v5"
                     confidence = "medium"
 
@@ -127,20 +157,20 @@ class ReactRouterDetector(FrameworkDetector):
                     signals[SIG_RSC_ENDPOINT_FOUND] = True
                     signals[SIG_INVOCATION_ENABLED] = True
                     signals[SIG_INVOCATION_CONFIDENCE] = "medium"
-                    signals["react_router_server_action_ids"] = list(discovery.action_ids)
+                    signals[SIG_REACT_ROUTER_SERVER_ACTION_IDS] = list(discovery.action_ids)
                     if discovery.action_endpoints:
                         signals[SIG_INVOCATION_ENDPOINTS] = list(discovery.action_endpoints)
                         signals[SIG_INVOCATION_CONFIDENCE] = "high"
 
         if detected_version == "v7":
             tags.add(TAG_REACT_ROUTER_V7)
-            signals["react_router_v7"] = True
+            signals[SIG_REACT_ROUTER_V7] = True
         elif detected_version == "v6":
             tags.add(TAG_REACT_ROUTER_V6)
-            signals["react_router_v6"] = True
+            signals[SIG_REACT_ROUTER_V6] = True
         elif detected_version == "v5":
             tags.add(TAG_REACT_ROUTER_V5)
-            signals["react_router_v5"] = True
+            signals[SIG_REACT_ROUTER_V5] = True
 
         if detected_version:
-            signals["react_router_confidence"] = confidence
+            signals[SIG_REACT_ROUTER_CONFIDENCE] = confidence

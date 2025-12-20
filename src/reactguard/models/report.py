@@ -6,13 +6,17 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Literal
 
 from .poc import PocStatus
 from .scan import FrameworkDetectionResult
 
 
-def _normalize_confidence_label(value: Any) -> str:
+ExternalConfidence = Literal["low", "medium", "high"]
+EvidenceClass = Literal["STRONG_POS", "WEAK_POS", "STRONG_NEG", "WEAK_NEG", "CONTRADICTORY", "NONE"]
+
+
+def normalize_confidence(value: Any) -> ExternalConfidence:
     """
     External contract: only ``low | medium | high``.
 
@@ -23,8 +27,6 @@ def _normalize_confidence_label(value: Any) -> str:
         return "high"
     if raw in {"med", "medium"}:
         return "medium"
-    if raw == "low":
-        return "low"
     return "low"
 
 
@@ -40,7 +42,7 @@ def _normalize_confidence_fields(value: Any) -> Any:
         for key, item in value.items():
             inner = _normalize_confidence_fields(item)
             if isinstance(key, str) and "confidence" in key.lower() and (inner is None or isinstance(inner, str)):
-                normalized[key] = _normalize_confidence_label(inner)
+                normalized[key] = normalize_confidence(inner)
             else:
                 normalized[key] = inner
         return normalized
@@ -49,12 +51,87 @@ def _normalize_confidence_fields(value: Any) -> Any:
     return value
 
 
-def _apply_verdict_invariants(status: PocStatus, details: dict[str, Any]) -> PocStatus:
-    # Require "VULNERABLE" to be backed by high confidence; otherwise downgrade.
-    confidence = details.get("confidence")
-    if status == PocStatus.VULNERABLE and confidence != "high":
-        return PocStatus.LIKELY_VULNERABLE
+def apply_verdict_invariants(status: PocStatus, details: dict[str, Any]) -> PocStatus:
+    # Require definitive verdicts to be backed by matching confidence tiers.
+    confidence = normalize_confidence(details.get("confidence"))
+    if status == PocStatus.VULNERABLE:
+        if confidence == "medium":
+            return PocStatus.LIKELY_VULNERABLE
+        if confidence == "low":
+            return PocStatus.INCONCLUSIVE
+    if status == PocStatus.NOT_VULNERABLE:
+        if confidence == "medium":
+            return PocStatus.LIKELY_NOT_VULNERABLE
+        if confidence == "low":
+            return PocStatus.INCONCLUSIVE
+    if status == PocStatus.NOT_APPLICABLE:
+        if confidence != "high":
+            return PocStatus.INCONCLUSIVE
+    if status in {PocStatus.LIKELY_VULNERABLE, PocStatus.LIKELY_NOT_VULNERABLE} and confidence == "low":
+        return PocStatus.INCONCLUSIVE
     return status
+
+
+@dataclass(frozen=True)
+class DecisionInputs:
+    transport_ok: bool
+    precondition_confident_false: bool
+    evidence_class: EvidenceClass
+    expected_surface: bool
+    decode_surface_reached: bool | None
+    coverage_multi: bool
+    has_comparable_baseline: bool = True
+
+
+def decide_verdict(inputs: DecisionInputs) -> tuple[PocStatus, ExternalConfidence]:
+    """Shared decision table for verdict+confidence normalization."""
+    if not inputs.transport_ok:
+        return (PocStatus.INCONCLUSIVE, "low")
+
+    if inputs.precondition_confident_false:
+        return (PocStatus.NOT_APPLICABLE, "high")
+
+    if inputs.evidence_class == "CONTRADICTORY":
+        confidence: ExternalConfidence = "high" if inputs.coverage_multi else "medium"
+        return (PocStatus.INCONCLUSIVE, confidence)
+
+    if inputs.evidence_class == "STRONG_POS" and inputs.decode_surface_reached is True:
+        return (PocStatus.VULNERABLE, "high")
+
+    if inputs.evidence_class == "WEAK_POS" and inputs.decode_surface_reached is True:
+        confidence = "high" if inputs.coverage_multi else "medium"
+        return (PocStatus.LIKELY_VULNERABLE, confidence)
+
+    if inputs.evidence_class == "STRONG_NEG" and inputs.decode_surface_reached is True:
+        return (PocStatus.NOT_VULNERABLE, "high")
+
+    if inputs.evidence_class == "WEAK_NEG" and inputs.decode_surface_reached is True:
+        return (PocStatus.LIKELY_NOT_VULNERABLE, "medium")
+
+    # No usable directional signal.
+    if inputs.expected_surface:
+        confidence = "medium" if inputs.coverage_multi else "low"
+        return (PocStatus.INCONCLUSIVE, confidence)
+
+    # Missing surface / not observed surface (maps to NOT_VULNERABLE by contract).
+    confidence = "medium" if inputs.coverage_multi else "low"
+    return (PocStatus.NOT_VULNERABLE, confidence)
+
+
+def normalize_report_mapping(report: dict[str, Any]) -> dict[str, Any]:
+    """
+    Normalize a mapping-style report (status/details/raw_data) to match external contract.
+    """
+    if not isinstance(report, dict):
+        return report
+    status = report.get("status")
+    details = report.get("details")
+    if isinstance(details, dict):
+        details_conf = normalize_confidence(details.get("confidence"))
+        details["confidence"] = details_conf
+        if isinstance(status, PocStatus):
+            report["status"] = apply_verdict_invariants(status, details)
+    return report
 
 
 @dataclass
@@ -96,7 +173,7 @@ class VulnerabilityReport:
     def to_dict(self) -> dict[str, Any]:
         details = _normalize_confidence_fields(dict(self.details or {}))
         raw_data = _normalize_confidence_fields(dict(self.raw_data or {}))
-        status = _apply_verdict_invariants(self.status, details) if isinstance(self.status, PocStatus) else self.status
+        status = apply_verdict_invariants(self.status, details) if isinstance(self.status, PocStatus) else self.status
         return {
             "status": status,
             "details": details,
@@ -204,4 +281,14 @@ class ScanReport:
         )
 
 
-__all__ = ["VulnerabilityReport", "ScanReport"]
+__all__ = [
+    "DecisionInputs",
+    "EvidenceClass",
+    "ExternalConfidence",
+    "ScanReport",
+    "VulnerabilityReport",
+    "apply_verdict_invariants",
+    "decide_verdict",
+    "normalize_confidence",
+    "normalize_report_mapping",
+]

@@ -3,14 +3,13 @@
 
 """Generic RSC detector."""
 
-import re
 from typing import Any
 
-from ...http.headers import header_value
-from ...utils import TagSet
-from ..base import DetectionContext, FrameworkDetector
-from ..constants import GENERIC_FLIGHT_PAYLOAD_PATTERN, GENERIC_FRAGMENT_PATTERN
-from ..keys import SIG_RSC_CONTENT_TYPE, SIG_RSC_FLIGHT_PAYLOAD, TAG_REACT_STREAMING, TAG_RSC
+from ...http.heuristics import looks_like_html
+from ...rsc.heuristics import is_rsc_content_type, looks_like_flight_payload
+from ..base import DetectionContext, DetectionState, FrameworkDetector
+from ..constants import GENERIC_FRAGMENT_PATTERN
+from ..keys import SIG_REACT_STREAMING_MARKERS, SIG_RSC_CONTENT_TYPE, SIG_RSC_FLIGHT_PAYLOAD, TAG_REACT_STREAMING, TAG_RSC
 
 
 class GenericRSCDetector(FrameworkDetector):
@@ -22,22 +21,21 @@ class GenericRSCDetector(FrameworkDetector):
         self,
         body: str,
         headers: dict[str, str],
-        tags: TagSet,
-        signals: dict[str, Any],
+        state: DetectionState,
         context: DetectionContext,
     ) -> None:
-        content_type = header_value(headers, "content-type")
-        if "text/x-component" in content_type:
+        tags = state.tags
+        signals = state.signals
+        if is_rsc_content_type(headers):
             tags.add(TAG_RSC)
             signals[SIG_RSC_CONTENT_TYPE] = True
 
         # Avoid flagging generic HTML as RSC just because it contains a Flight-looking substring
         # somewhere in a script tag. Real Flight responses start with `<row_id>:` lines.
-        looks_like_flight_document = bool(re.match(r"^\d+:", (body or "").lstrip()))
-        if looks_like_flight_document and GENERIC_FLIGHT_PAYLOAD_PATTERN.search(body):
+        if looks_like_flight_payload(body) and not looks_like_html(headers, body):
             tags.add(TAG_RSC)
             signals[SIG_RSC_FLIGHT_PAYLOAD] = True
 
         if GENERIC_FRAGMENT_PATTERN.search(body) or "<!--$-->" in body:
             tags.add(TAG_REACT_STREAMING)
-            signals["react_streaming_markers"] = True
+            signals[SIG_REACT_STREAMING_MARKERS] = True

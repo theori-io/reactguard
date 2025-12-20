@@ -7,15 +7,14 @@ from __future__ import annotations
 
 import time
 
-from ..config import load_http_settings
-from ..utils.context import get_scan_context
+from ..utils.context import get_http_settings, get_scan_context
 from .client import HttpClient
 from .models import HttpRequest, HttpResponse, RetryConfig
 
 
 def build_default_retry_config() -> RetryConfig:
     """Create a RetryConfig from environment-backed HttpSettings."""
-    settings = load_http_settings()
+    settings = get_http_settings()
     return RetryConfig.from_settings(settings)
 
 
@@ -27,7 +26,7 @@ def send_with_retries(
 ) -> HttpResponse:
     """Execute a request with basic retry/backoff semantics."""
     cfg = retry_config or build_default_retry_config()
-    settings = load_http_settings()
+    settings = get_http_settings()
     context = get_scan_context()
 
     attempt = 0

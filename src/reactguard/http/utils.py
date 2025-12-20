@@ -8,7 +8,7 @@ from typing import Any
 from ..config import DEFAULT_USER_AGENT, load_http_settings
 from ..utils.context import get_scan_context
 from .client import HttpClient
-from .models import HttpRequest
+from .models import HttpRequest, HttpResponse, RetryConfig
 from .retry import send_with_retries
 
 
@@ -27,14 +27,34 @@ def request_with_retries(
     headers: dict[str, str] | None = None,
     body: str | bytes | None = None,
     allow_redirects: bool = True,
-) -> dict[str, Any]:
-    """Execute an HTTP request with retries and return a normalized mapping."""
-    return scan_with_retry(
+) -> HttpResponse:
+    """Execute an HTTP request with retries and return a typed response."""
+    return _send_request(
         url,
         method=method,
         headers=headers,
         body=body,
         allow_redirects=allow_redirects,
+        retry_config=None,
+    )
+
+
+def request_once(
+    url: str,
+    *,
+    method: str = "GET",
+    headers: dict[str, str] | None = None,
+    body: str | bytes | None = None,
+    allow_redirects: bool = True,
+) -> HttpResponse:
+    """Execute a single HTTP request (no retries) and return a typed response."""
+    return _send_request(
+        url,
+        method=method,
+        headers=headers,
+        body=body,
+        allow_redirects=allow_redirects,
+        retry_config=RetryConfig(max_attempts=1),
     )
 
 
@@ -45,9 +65,29 @@ def scan_with_retry(
     headers: dict[str, str] | None = None,
     body: str | bytes | None = None,
     allow_redirects: bool = True,
-) -> dict[str, Any]:
-    """Execute an HTTP request with retries and return a normalized mapping."""
-    settings = load_http_settings()
+) -> HttpResponse:
+    """Execute an HTTP request with retries and return a typed response."""
+    return request_with_retries(
+        url,
+        method=method,
+        headers=headers,
+        body=body,
+        allow_redirects=allow_redirects,
+    )
+
+
+def _send_request(
+    url: str,
+    *,
+    method: str,
+    headers: dict[str, str] | None,
+    body: str | bytes | None,
+    allow_redirects: bool,
+    retry_config: RetryConfig | None,
+) -> HttpResponse:
+    """Execute an HTTP request with a configurable retry policy."""
+    context = get_scan_context()
+    settings = context.http_settings or load_http_settings()
     request_headers = dict(headers or {})
     request_headers.setdefault("User-Agent", settings.user_agent)
     client = get_http_client()
@@ -61,26 +101,16 @@ def scan_with_retry(
         allow_redirects=allow_redirects,
     )
 
-    response = send_with_retries(client, request)
-
-    result: dict[str, Any] = {
-        "ok": response.ok,
-        "status_code": response.status_code,
-        "headers": response.headers,
-        "body": response.text,
-        "body_snippet": response.body_snippet,
-        "url": response.url or url,
-        "error_message": response.error_message,
-        "error_type": response.error_type,
-    }
-    if result.get("ok") is False and result.get("error_message") and result.get("error") is None:
-        result["error"] = result["error_message"]
-    return result
+    response = send_with_retries(client, request, retry_config=retry_config)
+    if response.url is None:
+        response.url = url
+    return response
 
 
 __all__ = [
     "DEFAULT_USER_AGENT",
     "get_http_client",
+    "request_once",
     "request_with_retries",
     "scan_with_retry",
 ]

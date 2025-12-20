@@ -10,14 +10,14 @@ from dataclasses import dataclass
 
 from ...http import request_with_retries
 from ...http.url import build_endpoint_candidates
-from .bundle import extract_js_urls
+from ...http.js import DEFAULT_MAX_JS_ASSETS, DEFAULT_MAX_JS_BYTES, extract_js_asset_urls
 
 _FORM_BLOCK_RE = re.compile(r"<form\b(?P<attrs>[^>]*)>(?P<body>.*?)</form>", re.IGNORECASE | re.DOTALL)
 _FORM_ACTION_RE = re.compile(r"\baction\s*=\s*(?:[\"']([^\"']*)[\"']|([^\s>]+))", re.IGNORECASE)
 _ACTION_ID_RE = re.compile(r"name\s*=\s*(?:[\"'])?\$ACTION_ID_([^\"'\s>]+)", re.IGNORECASE)
 _ACTION_ID_BUNDLE_RE = re.compile(r"\$ACTION_ID_([^\"'\s>]+)", re.IGNORECASE)
 
-_DEFAULT_MAX_ASSETS = 8
+_DEFAULT_MAX_ASSETS = DEFAULT_MAX_JS_ASSETS
 _DEFAULT_MAX_ACTION_IDS = 8
 
 
@@ -35,17 +35,21 @@ def _scan_action_ids_from_bundles(
     max_action_ids: int = _DEFAULT_MAX_ACTION_IDS,
 ) -> list[str]:
     action_ids: list[str] = []
-    for asset_url in extract_js_urls(html, base_url)[: max(1, int(max_assets))]:
+    total_bytes = 0
+    for asset_url in extract_js_asset_urls(html, base_url, max_assets=max_assets):
         resp = request_with_retries(
             asset_url,
             headers={"Accept": "application/javascript, text/javascript, */*"},
             allow_redirects=True,
         )
-        if not resp.get("ok") or (resp.get("status_code") or 0) != 200:
+        if not resp.ok or (resp.status_code or 0) != 200:
             continue
-        body = str(resp.get("body") or resp.get("body_snippet") or "")
+        body = str(resp.text or resp.body_snippet or "")
         if not body:
             continue
+        total_bytes += len(body)
+        if DEFAULT_MAX_JS_BYTES and total_bytes > DEFAULT_MAX_JS_BYTES:
+            return action_ids
         for match in _ACTION_ID_BUNDLE_RE.finditer(body):
             aid = match.group(1)
             if not aid or aid in action_ids:

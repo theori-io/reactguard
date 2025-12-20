@@ -1,6 +1,7 @@
 # SPDX-FileCopyrightText: 2025 Theori Inc.
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
+from reactguard.http.models import HttpResponse
 from reactguard.models.poc import PocStatus
 from reactguard.vulnerability_detection.interpreters.expo_interpreter import ExpoInterpreter
 from reactguard.vulnerability_detection.interpreters.react_router_interpreter import ReactRouterInterpreter
@@ -13,11 +14,13 @@ def test_expo_connection_closed_is_likely_not_vulnerable():
     for proto probes while control succeeds. This should not be treated as VULNERABLE.
     """
     probe_results = [
-        {"status_code": 500, "body_snippet": "Connection closed.", "headers": {"content-type": "text/plain"}},
-        {"status_code": 500, "body_snippet": "Connection closed.", "headers": {"content-type": "text/plain"}},
-        {"status_code": 500, "body_snippet": "Connection closed.", "headers": {"content-type": "text/plain"}},
+        HttpResponse(ok=True, status_code=500, headers={"content-type": "text/plain"}, text="Connection closed."),
+        HttpResponse(ok=True, status_code=500, headers={"content-type": "text/plain"}, text="Connection closed."),
+        HttpResponse(ok=True, status_code=500, headers={"content-type": "text/plain"}, text="Connection closed."),
     ]
-    control_results = [{"status_code": 200, "body_snippet": '0:{"_value":"echo:hello"}\n', "headers": {"content-type": "text/plain"}}]
+    control_results = [
+        HttpResponse(ok=True, status_code=200, headers={"content-type": "text/plain"}, text='0:{"_value":"echo:hello"}\n')
+    ]
 
     analyzer = ExpoInterpreter(
         is_rsc_framework=True,
@@ -34,10 +37,10 @@ def test_expo_connection_closed_is_likely_not_vulnerable():
 
 def test_expo_prototype_error_is_vulnerable():
     probe_results = [
-        {"status_code": 500, "body_snippet": "Cannot read properties of null (reading 'id')", "headers": {"content-type": "text/plain"}},
-        {"status_code": 500, "body_snippet": "Cannot read properties of null (reading 'id')", "headers": {"content-type": "text/plain"}},
+        HttpResponse(ok=True, status_code=500, headers={"content-type": "text/plain"}, text="Cannot read properties of null (reading 'id')"),
+        HttpResponse(ok=True, status_code=500, headers={"content-type": "text/plain"}, text="Cannot read properties of null (reading 'id')"),
     ]
-    control_results = [{"status_code": 200, "body_snippet": '0:{"_value":"ok"}\n', "headers": {"content-type": "text/plain"}}]
+    control_results = [HttpResponse(ok=True, status_code=200, headers={"content-type": "text/plain"}, text='0:{"_value":"ok"}\n')]
 
     analyzer = ExpoInterpreter(
         is_rsc_framework=True,
@@ -54,11 +57,11 @@ def test_expo_prototype_error_is_vulnerable():
 
 def test_react_router_structural_divergence_is_vulnerable():
     probe_results = [
-        {"status_code": 500, "body_snippet": "Internal Server Error", "headers": {"content-type": "text/plain"}},
-        {"status_code": 500, "body_snippet": "Internal Server Error", "headers": {"content-type": "text/plain"}},
-        {"status_code": 500, "body_snippet": "Internal Server Error", "headers": {"content-type": "text/plain"}},
+        HttpResponse(ok=True, status_code=500, headers={"content-type": "text/plain"}, text="Internal Server Error"),
+        HttpResponse(ok=True, status_code=500, headers={"content-type": "text/plain"}, text="Internal Server Error"),
+        HttpResponse(ok=True, status_code=500, headers={"content-type": "text/plain"}, text="Internal Server Error"),
     ]
-    control_results = [{"status_code": 200, "body_snippet": '0:{"type":"action"}\n', "headers": {"x-powered-by": "Express"}}]
+    control_results = [HttpResponse(ok=True, status_code=200, headers={"x-powered-by": "Express"}, text='0:{"type":"action"}\n')]
 
     analyzer = ReactRouterInterpreter(
         is_rsc_framework=True,

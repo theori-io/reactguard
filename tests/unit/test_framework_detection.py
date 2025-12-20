@@ -1,6 +1,7 @@
 # SPDX-FileCopyrightText: 2025 Theori Inc.
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
+from reactguard.framework_detection.base import DetectionContext, DetectionState
 from reactguard.framework_detection.detectors.generic_rsc import GenericRSCDetector
 from reactguard.framework_detection.detectors.nextjs import NextJSDetector
 from reactguard.framework_detection.detectors.react_router import ReactRouterDetector
@@ -99,20 +100,20 @@ def test_normalize_headers_merges_response_headers():
 def test_apply_rsc_flags_marks_dependency_only():
     tags = TagSet()
     signals = {"react_bundle": True, "rsc_endpoint_found": False}
-    FrameworkDetectionEngine._apply_rsc_flags(tags, signals)
+    FrameworkDetectionEngine._apply_rsc_flags(DetectionState(tags=tags, signals=signals))
     assert signals["react_bundle_only"] is True
 
 
 def test_apply_rsc_flags_marks_rsc_runtime_dependency_only():
     tags = TagSet()
     signals = {"react_bundle": True, "react_server_dom_bundle": True, "rsc_endpoint_found": False}
-    FrameworkDetectionEngine._apply_rsc_flags(tags, signals)
+    FrameworkDetectionEngine._apply_rsc_flags(DetectionState(tags=tags, signals=signals))
     assert signals["rsc_dependency_only"] is True
 
 
 def test_nextjs_detector_infers_react_major_from_flight():
     assert NextJSDetector._react_major_from_flight('0:[null,["$"') == 18
-    assert NextJSDetector._react_major_from_flight('0:{\\"P\\":null') == 19
+    assert NextJSDetector._react_major_from_flight('__next_f.push([]);0:{\\"P\\":null') == 19
     assert NextJSDetector._react_major_from_flight('0:"$L') == 18
     assert NextJSDetector._react_major_from_flight("") is None
 
@@ -121,7 +122,7 @@ def test_infer_nextjs_rsc_signals_from_html():
     assert infer_nextjs_rsc_signals_from_html("") == (False, None)
     assert infer_nextjs_rsc_signals_from_html("__next_f.push([])")[0] is True
 
-    is_rsc, major = infer_nextjs_rsc_signals_from_html('0:{\\"P\\":null')
+    is_rsc, major = infer_nextjs_rsc_signals_from_html('__next_f.push([]);0:{\\"P\\":null')
     assert is_rsc is True
     assert major == 19
 
@@ -140,9 +141,8 @@ def test_nextjs_detector_does_not_infer_react_major_from_non_nextjs_html():
     detector.detect(
         body=r'<html><body><script>var s="0:{\"P\":null}";var x={0:{a:1}};</script></body></html>',
         headers={},
-        tags=tags,
-        signals=signals,
-        context=type("Ctx", (), {"url": None, "http_client": None})(),
+        state=DetectionState(tags=tags, signals=signals),
+        context=DetectionContext(url=None, http_client=None),
     )
     assert "nextjs" not in tags
     assert signals.get("detected_react_major") is None
@@ -156,9 +156,8 @@ def test_spa_detector_tags_react_spa(monkeypatch):
     detector.detect(
         body='<div id="root"></div><script type="module" src="/assets/main.js"></script><div data-reactroot="1"></div>',
         headers={},
-        tags=tags,
-        signals=signals,
-        context=type("Ctx", (), {"url": "http://example", "http_client": None})(),
+        state=DetectionState(tags=tags, signals=signals),
+        context=DetectionContext(url="http://example", http_client=None),
     )
     assert "react-spa" in tags
     assert signals["react_spa_structure"] is True
@@ -177,9 +176,8 @@ def test_waku_detector_collects_signals(monkeypatch):
     detector.detect(
         body='<meta name="generator" content="Waku"><script>var __waku_root=true;globalThis.wakuRoot=true</script>',
         headers={"x-waku-version": "0.19.0"},
-        tags=tags,
-        signals=signals,
-        context=type("Ctx", (), {"url": "http://example", "http_client": None})(),
+        state=DetectionState(tags=tags, signals=signals),
+        context=DetectionContext(url="http://example", http_client=None),
     )
     assert "waku" in tags and "rsc" in tags
     assert signals["invocation_enabled"] is True
@@ -203,9 +201,8 @@ def test_expo_detector_tags_framework(monkeypatch):
     detector.detect(
         body='__EXPO_ROUTER_HYDRATE__<div id="root"></div><style id="expo-reset"></style>',
         headers={},
-        tags=tags,
-        signals=signals,
-        context=type("Ctx", (), {"url": "http://example", "http_client": None})(),
+        state=DetectionState(tags=tags, signals=signals),
+        context=DetectionContext(url="http://example", http_client=None),
     )
     assert "expo" in tags
     assert signals["expo_router"] is True
@@ -220,9 +217,8 @@ def test_react_router_detector_does_not_probe_rsc(monkeypatch):
     detector.detect(
         body='__reactRouterManifest {"__reactRouterVersion":"7.0.0"}',
         headers={},
-        tags=tags,
-        signals=signals,
-        context=type("Ctx", (), {"url": "http://example", "http_client": None})(),
+        state=DetectionState(tags=tags, signals=signals),
+        context=DetectionContext(url="http://example", http_client=None),
     )
     assert "react-router-v7" in tags
     assert signals["react_router_confidence"] == "high"
@@ -236,14 +232,28 @@ def test_generic_rsc_detector_sets_signals():
     detector.detect(
         body='0:["$","$L"]\n<!--$-->',
         headers={"content-type": "text/x-component"},
-        tags=tags,
-        signals=signals,
-        context=None,
+        state=DetectionState(tags=tags, signals=signals),
+        context=DetectionContext(url=None, http_client=None),
     )
     assert "rsc" in tags
     assert "react-streaming" in tags
     assert signals["rsc_content_type"] is True
     assert signals["react_streaming_markers"] is True
+
+
+def test_generic_rsc_detector_does_not_flag_html_with_embedded_flight():
+    detector = GenericRSCDetector()
+    tags = TagSet()
+    signals = {}
+    detector.detect(
+        body="<html><body><script>\n0:[null,[\"$\",\"$L1\",null]]\n</script></body></html>",
+        headers={"content-type": "text/html"},
+        state=DetectionState(tags=tags, signals=signals),
+        context=DetectionContext(url=None, http_client=None),
+    )
+    assert "rsc" not in tags
+    assert signals.get("rsc_content_type") is None
+    assert signals.get("rsc_flight_payload") is None
 
 
 def test_react_major_evidence_conflict_is_annotated():
@@ -260,3 +270,24 @@ def test_react_major_evidence_conflict_is_annotated():
     assert signals["react_major_conflict_confidence"] == "high"
     assert signals["react_major_conflict_majors"] == [18, 19]
     assert {entry.get("major") for entry in signals.get("react_major_evidence") or []} == {18, 19}
+
+
+def test_react_router_detector_sets_server_functions_when_action_id_present():
+    detector = ReactRouterDetector()
+    tags = TagSet()
+    signals = {}
+    detector.detect(
+        body='<form action="/submit" method="POST"><input type="hidden" name="$ACTION_ID_abcd#run" /></form>',
+        headers={},
+        state=DetectionState(tags=tags, signals=signals),
+        context=DetectionContext(url="http://example/app", http_client=None),
+    )
+    assert "react-router-v7" in tags
+    assert "react-router-v7-rsc" in tags
+    assert "react-router-v7-server-actions" in tags
+    assert signals["react_router_confidence"] == "high"
+    assert signals["react_router_server_action_ids"] == ["abcd#run"]
+    assert signals["rsc_endpoint_found"] is True
+    assert signals["invocation_enabled"] is True
+    assert signals["invocation_confidence"] == "high"
+    assert any("submit" in ep for ep in signals.get("invocation_endpoints") or [])

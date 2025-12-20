@@ -7,8 +7,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from ..config import load_http_settings
-from ..utils.context import get_scan_context
+from ..utils.context import get_http_settings, get_scan_context
 from .client import HttpClient
 from .models import HttpRequest, HttpResponse
 
@@ -26,7 +25,7 @@ class WorkerHttpClientAdapter(HttpClient):
             context = get_scan_context()
             timeout = request.timeout
             if timeout is None:
-                timeout = context.timeout if context.timeout is not None else load_http_settings().timeout
+                timeout = context.timeout if context.timeout is not None else get_http_settings().timeout
             scan_kwargs: dict[str, Any] = {
                 "method": request.method,
                 "headers": request.headers,

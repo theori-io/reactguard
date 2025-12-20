@@ -8,9 +8,9 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, TypedDict
+from typing import Any
 
-from typing_extensions import NotRequired
+from ..http.models import HttpResponse
 
 
 class RscWireFormat(str, Enum):
@@ -41,26 +41,26 @@ class RscRequestConfig:
     allow_redirects: bool = True
 
 
-class RscHttpResult(TypedDict):
-    """
-    Normalized HTTP result produced by `send_rsc_request`.
+@dataclass
+class RscResponse(HttpResponse):
+    """HTTP response plus RSC request metadata."""
 
-    This is a request_with_retries-compatible mapping with additional RSC metadata.
-    """
+    endpoint: str = ""
+    action_id: str | None = None
+    request_wire_format: str = ""
+    payload_meta: dict[str, Any] = field(default_factory=dict)
 
-    ok: bool
-    status_code: int | None
-    headers: dict[str, Any]
-    body: str
-    body_snippet: str
-    url: str
-    error_message: NotRequired[str | None]
-    error_type: NotRequired[str | None]
-    error: NotRequired[str | None]
-    endpoint: str
-    action_id: NotRequired[str | None]
-    request_wire_format: str
-    payload_meta: NotRequired[dict[str, Any]]
+    def to_mapping(self) -> dict[str, Any]:
+        base = super().to_mapping()
+        base.update(
+            {
+                "endpoint": self.endpoint,
+                "action_id": self.action_id,
+                "request_wire_format": self.request_wire_format,
+                "payload_meta": dict(self.payload_meta or {}),
+            }
+        )
+        return base
 
 
 PayloadFactory = Callable[[str], RscPayload]

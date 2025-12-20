@@ -17,6 +17,7 @@ from .server_actions import (
     detect_server_actions,
     generate_action_id,
     probe_server_actions_support,
+    ServerActionsProbeResult,
 )
 from .waku import (
     probe_waku_minimal_html,
@@ -36,6 +37,7 @@ __all__ = [
     "probe_rsc_endpoint",
     "probe_server_actions",
     "probe_server_actions_support",
+    "ServerActionsProbeResult",
     "probe_waku_minimal_html",
     "probe_waku_rsc_surface",
     "probe_waku_server_actions",

@@ -8,14 +8,11 @@ from __future__ import annotations
 from collections import deque
 from dataclasses import dataclass
 from html.parser import HTMLParser
-from typing import Any
 from urllib.parse import urljoin, urlparse
 
-from ..config import load_http_settings
-from .headers import header_value
-from .models import HttpRequest, RetryConfig
-from .retry import send_with_retries
-from .utils import get_http_client
+from .heuristics import looks_like_html
+from .models import HttpResponse
+from .utils import request_once
 
 
 @dataclass(frozen=True)
@@ -42,42 +39,18 @@ class _HrefParser(HTMLParser):
 
 def _scan_once(
     url: str,
-) -> dict[str, Any]:
-    settings = load_http_settings()
-    client = get_http_client()
-
-    request = HttpRequest(
-        url=url,
-        method="GET",
-        headers={"Accept": "text/html, */*", "User-Agent": settings.user_agent},
-        timeout=None,
+) -> HttpResponse:
+    return request_once(
+        url,
+        headers={"Accept": "text/html, */*"},
         allow_redirects=True,
     )
-    response = send_with_retries(client, request, retry_config=RetryConfig(max_attempts=1))
-
-    result: dict[str, Any] = {
-        "ok": response.ok,
-        "status_code": response.status_code,
-        "headers": response.headers,
-        "body": response.text,
-        "body_snippet": response.body_snippet,
-        "url": response.url or url,
-        "error_message": response.error_message,
-        "error_type": response.error_type,
-    }
-    if result.get("ok") is False and result.get("error_message") and result.get("error") is None:
-        result["error"] = result["error_message"]
-    return result
 
 
-def _looks_like_html(resp: dict[str, Any]) -> bool:
-    headers = resp.get("headers") or {}
-    content_type = header_value(headers, "content-type").lower()
-    if "text/html" in content_type:
-        return True
-    body = str(resp.get("body") or resp.get("body_snippet") or "").lstrip()
-    lowered = body[:256].lower()
-    return lowered.startswith("<!doctype") or lowered.startswith("<html") or "<html" in lowered
+def _looks_like_html(resp: HttpResponse) -> bool:
+    headers = getattr(resp, "headers", {}) or {}
+    body = getattr(resp, "text", "") or getattr(resp, "body_snippet", "")
+    return looks_like_html(headers, body)
 
 
 def _same_origin(start: str, candidate: str) -> bool:
@@ -124,7 +97,7 @@ def crawl_same_origin_html(
         visited.add(url)
 
         resp = _scan_once(url)
-        final_url = str(resp.get("url") or url)
+        final_url = str(getattr(resp, "url", None) or url)
         if final_url and final_url != url:
             if depth == 0 and url == start_norm:
                 start_origin_url = final_url
@@ -135,13 +108,29 @@ def crawl_same_origin_html(
             visited.add(final_url)
             url = final_url
 
-        if not resp.get("ok"):
-            out.append(CrawledPage(url=url, status_code=resp.get("status_code"), headers=dict(resp.get("headers") or {}), body="", depth=depth))
+        if not getattr(resp, "ok", False):
+            out.append(
+                CrawledPage(
+                    url=url,
+                    status_code=getattr(resp, "status_code", None),
+                    headers=dict(getattr(resp, "headers", {}) or {}),
+                    body="",
+                    depth=depth,
+                )
+            )
             continue
 
-        body = str(resp.get("body") or resp.get("body_snippet") or "")
-        headers = dict(resp.get("headers") or {})
-        out.append(CrawledPage(url=url, status_code=resp.get("status_code"), headers=headers, body=body, depth=depth))
+        body = str(getattr(resp, "text", "") or getattr(resp, "body_snippet", "") or "")
+        headers = dict(getattr(resp, "headers", {}) or {})
+        out.append(
+            CrawledPage(
+                url=url,
+                status_code=getattr(resp, "status_code", None),
+                headers=headers,
+                body=body,
+                depth=depth,
+            )
+        )
 
         if depth >= max_depth:
             continue
